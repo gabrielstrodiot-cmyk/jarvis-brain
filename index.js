@@ -10,6 +10,7 @@ app.use(express.json())
 const claude = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 const VAULT_PATH = process.env.VAULT_PATH
 const MEMORY_FILE = path.join(__dirname, 'memory.json')
+const NOTION_TOKEN = process.env.NOTION_TOKEN
 
 // ── MÉMOIRE ────────────────────────────────────────────────────
 
@@ -27,23 +28,12 @@ function saveMemory(memory) {
 }
 
 function addToHistory(memory, role, content) {
-  memory.history.push({
-    role,
-    content,
-    timestamp: new Date().toISOString()
-  })
-  // Garde les 20 derniers échanges seulement
-  if (memory.history.length > 20) {
-    memory.history = memory.history.slice(-20)
-  }
+  memory.history.push({ role, content, timestamp: new Date().toISOString() })
+  if (memory.history.length > 20) memory.history = memory.history.slice(-20)
 }
 
 function buildHistoryMessages(memory) {
-  // Retourne les 10 derniers pour le contexte Claude
-  return memory.history.slice(-10).map(h => ({
-    role: h.role,
-    content: h.content
-  }))
+  return memory.history.slice(-10).map(h => ({ role: h.role, content: h.content }))
 }
 
 function formatFactsForPrompt(memory) {
@@ -56,9 +46,7 @@ function formatFactsForPrompt(memory) {
 function writeNote(filename, content) {
   const inboxPath = path.join(VAULT_PATH, '00_Jarvis', 'Inbox')
   if (!fs.existsSync(inboxPath)) fs.mkdirSync(inboxPath, { recursive: true })
-  const filepath = path.join(inboxPath, filename)
-  fs.writeFileSync(filepath, content, 'utf8')
-  return filepath
+  fs.writeFileSync(path.join(inboxPath, filename), content, 'utf8')
 }
 
 function listRecentNotes(n = 5) {
@@ -76,15 +64,123 @@ function searchNotes(query) {
   const inboxPath = path.join(VAULT_PATH, '00_Jarvis', 'Inbox')
   if (!fs.existsSync(inboxPath)) return []
   const results = []
-  const files = fs.readdirSync(inboxPath).filter(f => f.endsWith('.md'))
-  for (const file of files) {
+  for (const file of fs.readdirSync(inboxPath).filter(f => f.endsWith('.md'))) {
     const content = fs.readFileSync(path.join(inboxPath, file), 'utf8')
-    if (content.toLowerCase().includes(query.toLowerCase()) ||
-        file.toLowerCase().includes(query.toLowerCase())) {
+    if (content.toLowerCase().includes(query.toLowerCase()) || file.toLowerCase().includes(query.toLowerCase())) {
       results.push({ file, preview: content.slice(0, 200) })
     }
   }
   return results
+}
+
+// ── NOTION HELPERS ─────────────────────────────────────────────
+
+async function notionRequest(method, endpoint, body = null) {
+  const options = {
+    method,
+    headers: {
+      'Authorization': `Bearer ${NOTION_TOKEN}`,
+      'Content-Type': 'application/json',
+      'Notion-Version': '2022-06-28'
+    }
+  }
+  if (body) options.body = JSON.stringify(body)
+  const res = await fetch(`https://api.notion.com/v1${endpoint}`, options)
+  return res.json()
+}
+
+// Cherche une page/base par titre dans Notion
+async function notionSearch(query) {
+  const data = await notionRequest('POST', '/search', {
+    query,
+    page_size: 5
+  })
+  return data.results || []
+}
+
+// Crée une page Notion dans un parent donné
+async function notionCreatePage(parentId, title, content, isDatabase = false) {
+  const blocks = contentToNotionBlocks(content)
+  const body = {
+    parent: isDatabase
+      ? { database_id: parentId }
+      : { page_id: parentId },
+    properties: {
+      title: {
+        title: [{ text: { content: title } }]
+      }
+    },
+    children: blocks
+  }
+  return notionRequest('POST', '/pages', body)
+}
+
+// Crée une page Notion standalone (sans parent spécifique)
+async function notionCreateStandalonePage(title, content) {
+  // Cherche d'abord si une page parente existe dans le workspace
+  const searchResults = await notionSearch('')
+  const firstPage = searchResults.find(r => r.object === 'page' || r.object === 'database')
+
+  const blocks = contentToNotionBlocks(content)
+  const body = {
+    parent: firstPage
+      ? { page_id: firstPage.id }
+      : { type: 'workspace', workspace: true },
+    properties: {
+      title: {
+        title: [{ text: { content: title } }]
+      }
+    },
+    children: blocks
+  }
+  return notionRequest('POST', '/pages', body)
+}
+
+// Convertit du texte markdown simple en blocs Notion
+function contentToNotionBlocks(content) {
+  const lines = content.split('\n').filter(l => l.trim())
+  const blocks = []
+
+  for (const line of lines) {
+    if (line.startsWith('# ')) {
+      blocks.push({ object: 'block', type: 'heading_1', heading_1: { rich_text: [{ text: { content: line.slice(2) } }] } })
+    } else if (line.startsWith('## ')) {
+      blocks.push({ object: 'block', type: 'heading_2', heading_2: { rich_text: [{ text: { content: line.slice(3) } }] } })
+    } else if (line.startsWith('### ')) {
+      blocks.push({ object: 'block', type: 'heading_3', heading_3: { rich_text: [{ text: { content: line.slice(4) } }] } })
+    } else if (line.startsWith('- ') || line.startsWith('• ')) {
+      blocks.push({ object: 'block', type: 'bulleted_list_item', bulleted_list_item: { rich_text: [{ text: { content: line.slice(2) } }] } })
+    } else if (/^\d+\./.test(line)) {
+      blocks.push({ object: 'block', type: 'numbered_list_item', numbered_list_item: { rich_text: [{ text: { content: line.replace(/^\d+\.\s*/, '') } }] } })
+    } else if (line.startsWith('> ')) {
+      blocks.push({ object: 'block', type: 'quote', quote: { rich_text: [{ text: { content: line.slice(2) } }] } })
+    } else if (line.startsWith('---')) {
+      blocks.push({ object: 'block', type: 'divider', divider: {} })
+    } else {
+      blocks.push({ object: 'block', type: 'paragraph', paragraph: { rich_text: [{ text: { content: line } }] } })
+    }
+  }
+
+  // Notion limite à 100 blocs par requête
+  return blocks.slice(0, 100)
+}
+
+// Lit le contenu d'une page Notion
+async function notionReadPage(pageId) {
+  const page = await notionRequest('GET', `/pages/${pageId}`)
+  const blocks = await notionRequest('GET', `/blocks/${pageId}/children?page_size=100`)
+  const textContent = (blocks.results || []).map(block => {
+    const type = block.type
+    const richText = block[type]?.rich_text || []
+    return richText.map(t => t.plain_text).join('')
+  }).filter(Boolean).join('\n')
+  return { page, textContent }
+}
+
+// Ajoute du contenu à une page existante
+async function notionAppendToPage(pageId, content) {
+  const blocks = contentToNotionBlocks(content)
+  return notionRequest('PATCH', `/blocks/${pageId}/children`, { children: blocks })
 }
 
 // ── SYSTEM PROMPT ──────────────────────────────────────────────
@@ -108,15 +204,26 @@ function buildSystemPrompt(memory) {
 - Ton ton : entre un CTO de startup et un coach de haut niveau
 - Tu tutoies toujours Gabriel
 
-## TES CAPACITÉS VAULT
+## TES CAPACITÉS VAULT OBSIDIAN
 - Pour écrire une note : [WRITE_NOTE: titre]
 - Pour lire les notes récentes : [LIST_NOTES]
 - Pour chercher dans le vault : [SEARCH_NOTES: mot-clé]
 
+## TES CAPACITÉS NOTION
+- Pour créer une page Notion : [NOTION_CREATE: titre | contenu complet de la page]
+- Pour chercher dans Notion : [NOTION_SEARCH: mot-clé]
+- Pour lire une page Notion : [NOTION_READ: nom de la page]
+- Pour ajouter du contenu à une page : [NOTION_APPEND: nom de la page | contenu à ajouter]
+
+### Règles Notion
+- Utilise [NOTION_CREATE: ...] quand Gabriel veut créer une page, un document, une fiche, un résumé
+- Le contenu après le | peut être du markdown (titres ##, listes -, etc.)
+- Tu peux combiner [SEARCH_NOTES: ...] puis [NOTION_CREATE: ...] pour créer une page Notion depuis les données Obsidian
+- Quand tu crées une page complète, structure-la avec des titres clairs
+
 ## MÉMOIRE
-- Pour retenir un fait important sur Gabriel : [REMEMBER: fait à retenir]
-- Tu peux combiner plusieurs commandes dans une même réponse
-- Utilise [REMEMBER: ...] quand Gabriel mentionne quelque chose d'important (projet, objectif, préférence, décision)
+- Pour retenir un fait important : [REMEMBER: fait à retenir]
+- Utilise [REMEMBER: ...] quand Gabriel mentionne quelque chose d'important
 
 ## RÈGLES
 - Réponds TOUJOURS en français sauf si Gabriel écrit en anglais
@@ -133,40 +240,33 @@ app.post('/chat', async (req, res) => {
 
   const memory = loadMemory()
 
-  // Contexte vault
   let vaultContext = ''
   try {
     const recentNotes = listRecentNotes(3)
-    if (recentNotes.length > 0) {
-      vaultContext = ` [Vault — notes récentes : ${recentNotes.join(', ')}]`
-    }
+    if (recentNotes.length > 0) vaultContext = ` [Vault — notes récentes : ${recentNotes.join(', ')}]`
   } catch (e) {}
 
-  // Construit les messages avec historique
   const historyMessages = buildHistoryMessages(memory)
   const currentMessage = message + vaultContext
-
-  // Ajoute le message user à l'historique
   addToHistory(memory, 'user', message)
 
   try {
     const response = await claude.messages.create({
       model: 'claude-sonnet-4-5',
-      max_tokens: 1024,
+      max_tokens: 2048,
       system: buildSystemPrompt(memory),
       messages: [...historyMessages, { role: 'user', content: currentMessage }]
     })
 
     let reply = response.content[0].text
     let noteCreated = null
+    let notionCreated = null
 
     // ── Traite REMEMBER ──
     const rememberMatches = [...reply.matchAll(/\[REMEMBER:\s*(.+?)\]/gi)]
     for (const match of rememberMatches) {
       const fact = match[1].trim()
-      if (!memory.facts.includes(fact)) {
-        memory.facts.push(fact)
-      }
+      if (!memory.facts.includes(fact)) memory.facts.push(fact)
       reply = reply.replace(match[0], '')
     }
 
@@ -180,7 +280,7 @@ app.post('/chat', async (req, res) => {
       const noteContent = `# ${title}\n\n${cleanReply}\n\n---\n*Créé par Jarvis le ${date} à ${time}*`
       const filename = `${date}-${title.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')}.md`
       try { writeNote(filename, noteContent); noteCreated = filename } catch (e) {}
-      reply = cleanReply + `\n\n📝 Note créée : \`${filename}\``
+      reply = cleanReply + `\n\n📝 Note Obsidian créée : \`${filename}\``
     }
 
     // ── Traite LIST_NOTES ──
@@ -200,9 +300,60 @@ app.post('/chat', async (req, res) => {
       reply = reply.replace(/\[SEARCH_NOTES:[^\]]+\]/i, searchText)
     }
 
-    reply = reply.trim()
+    // ── Traite NOTION_CREATE ──
+    const notionCreateMatch = reply.match(/\[NOTION_CREATE:\s*(.+?)\s*\|\s*([\s\S]+?)\]/i)
+    if (notionCreateMatch) {
+      const title = notionCreateMatch[1].trim()
+      const content = notionCreateMatch[2].trim()
+      try {
+        const page = await notionCreateStandalonePage(title, content)
+        const pageUrl = page.url || ''
+        notionCreated = { title, url: pageUrl }
+        reply = reply.replace(/\[NOTION_CREATE:[\s\S]+?\]/i, '').trim()
+        reply += `\n\n📄 Page Notion créée : **${title}**${pageUrl ? `\n🔗 ${pageUrl}` : ''}`
+      } catch (e) {
+        reply = reply.replace(/\[NOTION_CREATE:[\s\S]+?\]/i, '').trim()
+        reply += `\n\n❌ Erreur Notion : ${e.message}`
+      }
+    }
 
-    // Ajoute la réponse à l'historique et sauvegarde
+    // ── Traite NOTION_SEARCH ──
+    const notionSearchMatch = reply.match(/\[NOTION_SEARCH:\s*(.+?)\]/i)
+    if (notionSearchMatch) {
+      try {
+        const results = await notionSearch(notionSearchMatch[1].trim())
+        const titles = results.map(r => {
+          const title = r.properties?.title?.title?.[0]?.plain_text || r.properties?.Name?.title?.[0]?.plain_text || 'Sans titre'
+          return `- ${title} (${r.object})`
+        }).join('\n')
+        reply = reply.replace(/\[NOTION_SEARCH:[^\]]+\]/i, titles || 'Aucun résultat Notion')
+      } catch (e) {
+        reply = reply.replace(/\[NOTION_SEARCH:[^\]]+\]/i, `Erreur Notion : ${e.message}`)
+      }
+    }
+
+    // ── Traite NOTION_APPEND ──
+    const notionAppendMatch = reply.match(/\[NOTION_APPEND:\s*(.+?)\s*\|\s*([\s\S]+?)\]/i)
+    if (notionAppendMatch) {
+      const pageName = notionAppendMatch[1].trim()
+      const content = notionAppendMatch[2].trim()
+      try {
+        const results = await notionSearch(pageName)
+        if (results.length > 0) {
+          await notionAppendToPage(results[0].id, content)
+          reply = reply.replace(/\[NOTION_APPEND:[\s\S]+?\]/i, '').trim()
+          reply += `\n\n✅ Contenu ajouté à la page Notion **${pageName}**`
+        } else {
+          reply = reply.replace(/\[NOTION_APPEND:[\s\S]+?\]/i, '').trim()
+          reply += `\n\n❌ Page Notion "${pageName}" introuvable`
+        }
+      } catch (e) {
+        reply = reply.replace(/\[NOTION_APPEND:[\s\S]+?\]/i, '').trim()
+        reply += `\n\n❌ Erreur Notion : ${e.message}`
+      }
+    }
+
+    reply = reply.trim()
     addToHistory(memory, 'assistant', reply)
     saveMemory(memory)
 
@@ -211,6 +362,7 @@ app.post('/chat', async (req, res) => {
       model: 'claude-sonnet-4-5',
       timestamp: new Date().toISOString(),
       noteCreated,
+      notionCreated,
       factsCount: memory.facts.length
     })
 
@@ -251,10 +403,48 @@ app.get('/vault/notes', (req, res) => {
   }
 })
 
+// ── ROUTES NOTION DIRECTES ─────────────────────────────────────
+
+app.get('/notion/search', async (req, res) => {
+  const { q } = req.query
+  if (!q) return res.status(400).json({ error: 'Paramètre q requis' })
+  try {
+    const results = await notionSearch(q)
+    res.json({ results: results.map(r => ({
+      id: r.id,
+      type: r.object,
+      title: r.properties?.title?.title?.[0]?.plain_text || r.properties?.Name?.title?.[0]?.plain_text || 'Sans titre',
+      url: r.url
+    }))})
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.post('/notion/page', async (req, res) => {
+  const { title, content, parentId } = req.body
+  if (!title) return res.status(400).json({ error: 'Titre requis' })
+  try {
+    const page = parentId
+      ? await notionCreatePage(parentId, title, content || '')
+      : await notionCreateStandalonePage(title, content || '')
+    res.json({ ok: true, id: page.id, url: page.url })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
 // ── SANTÉ ──────────────────────────────────────────────────────
 
 app.get('/health', (req, res) => {
-  res.json({ status: 'Jarvis is alive 🤖', timestamp: new Date().toISOString() })
+  res.json({
+    status: 'Jarvis is alive 🤖',
+    timestamp: new Date().toISOString(),
+    integrations: {
+      notion: !!NOTION_TOKEN,
+      vault: !!VAULT_PATH
+    }
+  })
 })
 
 const PORT = process.env.PORT || 3000
@@ -262,4 +452,5 @@ app.listen(PORT, () => {
   console.log(`🤖 Jarvis Brain démarré sur le port ${PORT}`)
   console.log(`📁 Vault Obsidian : ${VAULT_PATH}`)
   console.log(`🧠 Mémoire : ${MEMORY_FILE}`)
-})// redeploy sam. 18 avr. 2026 08:26:36 CEST
+  console.log(`📄 Notion : ${NOTION_TOKEN ? '✅ connecté' : '❌ token manquant'}`)
+})
