@@ -262,4 +262,4 @@ app.listen(PORT, () => {
   console.log(`🤖 Jarvis Brain démarré sur le port ${PORT}`)
   console.log(`📁 Vault Obsidian : ${VAULT_PATH}`)
   console.log(`🧠 Mémoire : ${MEMORY_FILE}`)
-})
+})// redeploy sam. 18 avr. 2026 08:26:36 CEST
