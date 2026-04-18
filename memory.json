@@ -1,5 +1,18 @@
 {
   "profile": {},
-  "facts": [],
-  "history": []
+  "facts": [
+    "Objectif principal 2026 = 10 clients coaching actifs"
+  ],
+  "history": [
+    {
+      "role": "user",
+      "content": "Retiens que mon objectif principal en 2026 est d atteindre 10 clients coaching actifs",
+      "timestamp": "2026-04-18T20:25:47.960Z"
+    },
+    {
+      "role": "assistant",
+      "content": "Noté. Ça va demander une stratégie d'acquisition claire.\n\nJe vois que tu prépares le lancement FLOW mai 2026. Tu veux qu'on construise un système pour convertir ton audience Instagram vers ces places coaching ? \n\nGenre : contenu → lead magnet → appel découverte → closing ?",
+      "timestamp": "2026-04-18T20:25:52.622Z"
+    }
+  ]
 }
