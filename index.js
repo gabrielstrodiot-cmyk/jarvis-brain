@@ -3,6 +3,7 @@ const express = require('express')
 const Anthropic = require('@anthropic-ai/sdk')
 const fs = require('fs')
 const path = require('path')
+const { google } = require('googleapis')
 
 const app = express()
 app.use(express.json())
@@ -11,7 +12,73 @@ const claude = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 const VAULT_PATH = process.env.VAULT_PATH
 const MEMORY_FILE = path.join(__dirname, 'memory.json')
 const NOTION_TOKEN = process.env.NOTION_TOKEN
-const NOTION_ROOT_PAGE = process.env.NOTION_ROOT_PAGE || '346a16a5-dea2-8068-86dd-c2c058d03572'
+const NOTION_MEMORY_PAGE_ID = '346a16a5-dea2-811b-a3c2-e15932a2fb19'
+const TOKEN_FILE = path.join(__dirname, 'google_token.json')
+
+// ── GOOGLE OAUTH ───────────────────────────────────────────────
+
+const oauth2Client = new google.auth.OAuth2(
+  process.env.GOOGLE_CLIENT_ID,
+  process.env.GOOGLE_CLIENT_SECRET,
+  'http://localhost:3000/auth/callback'
+)
+
+if (fs.existsSync(TOKEN_FILE)) {
+  const token = JSON.parse(fs.readFileSync(TOKEN_FILE, 'utf8'))
+  oauth2Client.setCredentials(token)
+}
+
+async function getCalendarEvents() {
+  try {
+    const calendar = google.calendar({ version: 'v3', auth: oauth2Client })
+    const now = new Date()
+    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0)
+    const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59)
+
+    const response = await calendar.events.list({
+      calendarId: 'primary',
+      timeMin: startOfDay.toISOString(),
+      timeMax: endOfDay.toISOString(),
+      singleEvents: true,
+      orderBy: 'startTime'
+    })
+
+    const events = response.data.items || []
+    if (events.length === 0) return 'Aucun événement aujourd\'hui.'
+
+    return events.map(e => {
+      const start = e.start.dateTime
+        ? new Date(e.start.dateTime).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+        : 'Toute la journée'
+      return `- ${start} : ${e.summary}`
+    }).join('\n')
+  } catch (e) {
+    return 'Calendar non connecté.'
+  }
+}
+
+// ── ROUTES AUTH GOOGLE ─────────────────────────────────────────
+
+app.get('/auth/google', (req, res) => {
+  const url = oauth2Client.generateAuthUrl({
+    access_type: 'offline',
+    scope: ['https://www.googleapis.com/auth/calendar.readonly'],
+    prompt: 'consent'
+  })
+  res.redirect(url)
+})
+
+app.get('/auth/callback', async (req, res) => {
+  const { code } = req.query
+  try {
+    const { tokens } = await oauth2Client.getToken(code)
+    oauth2Client.setCredentials(tokens)
+    fs.writeFileSync(TOKEN_FILE, JSON.stringify(tokens, null, 2))
+    res.send('✅ Google Calendar connecté ! Tu peux fermer cet onglet et relancer Jarvis.')
+  } catch (e) {
+    res.status(500).send('Erreur auth : ' + e.message)
+  }
+})
 
 // ── MÉMOIRE ────────────────────────────────────────────────────
 
@@ -90,7 +157,29 @@ async function notionRequest(method, endpoint, body = null) {
   return res.json()
 }
 
-// Cherche une page/base par titre dans Notion
+async function loadFactsFromNotion() {
+  try {
+    const page = await notionReadPage(NOTION_MEMORY_PAGE_ID)
+    const lines = page.textContent.split('\n')
+    const facts = lines
+      .filter(l => l.trim().startsWith('- ') && l.trim().length > 2)
+      .map(l => l.trim().slice(2).trim())
+      .filter(f => f.length > 0)
+    return facts
+  } catch (e) {
+    return []
+  }
+}
+
+async function saveFactsToNotion(facts) {
+  try {
+    const factLines = facts.length > 0 ? facts.map(f => `- ${f}`).join('\n') : '- '
+    const date = new Date().toLocaleDateString('fr-FR')
+    const content = `## 🧩 Facts retenus\n\n${factLines}\n\n---\n\n## 📅 Dernière mise à jour\n\n→ ${date}`
+    await notionAppendToPage(NOTION_MEMORY_PAGE_ID, content)
+  } catch (e) {}
+}
+
 async function notionSearch(query) {
   const data = await notionRequest('POST', '/search', {
     query,
@@ -99,7 +188,6 @@ async function notionSearch(query) {
   return data.results || []
 }
 
-// Crée une page Notion dans un parent donné
 async function notionCreatePage(parentId, title, content, isDatabase = false) {
   const blocks = contentToNotionBlocks(content)
   const body = {
@@ -116,20 +204,24 @@ async function notionCreatePage(parentId, title, content, isDatabase = false) {
   return notionRequest('POST', '/pages', body)
 }
 
-// Crée une page Notion dans la page root Jarvis
 async function notionCreateStandalonePage(title, content) {
+  const searchResults = await notionSearch('')
+  const firstPage = searchResults.find(r => r.object === 'page' || r.object === 'database')
   const blocks = contentToNotionBlocks(content)
   const body = {
-    parent: { page_id: NOTION_ROOT_PAGE },
+    parent: firstPage
+      ? { page_id: firstPage.id }
+      : { type: 'workspace', workspace: true },
     properties: {
-      title: { title: [{ text: { content: title } }] }
+      title: {
+        title: [{ text: { content: title } }]
+      }
     },
     children: blocks
   }
   return notionRequest('POST', '/pages', body)
 }
 
-// Convertit du texte markdown simple en blocs Notion
 function contentToNotionBlocks(content) {
   const lines = content.split('\n').filter(l => l.trim())
   const blocks = []
@@ -154,11 +246,9 @@ function contentToNotionBlocks(content) {
     }
   }
 
-  // Notion limite à 100 blocs par requête
   return blocks.slice(0, 100)
 }
 
-// Lit le contenu d'une page Notion
 async function notionReadPage(pageId) {
   const page = await notionRequest('GET', `/pages/${pageId}`)
   const blocks = await notionRequest('GET', `/blocks/${pageId}/children?page_size=100`)
@@ -170,7 +260,6 @@ async function notionReadPage(pageId) {
   return { page, textContent }
 }
 
-// Ajoute du contenu à une page existante
 async function notionAppendToPage(pageId, content) {
   const blocks = contentToNotionBlocks(content)
   return notionRequest('PATCH', `/blocks/${pageId}/children`, { children: blocks })
@@ -178,8 +267,9 @@ async function notionAppendToPage(pageId, content) {
 
 // ── SYSTEM PROMPT ──────────────────────────────────────────────
 
-function buildSystemPrompt(memory) {
+function buildSystemPrompt(memory, calendarEvents) {
   const facts = formatFactsForPrompt(memory)
+  const calendar = calendarEvents ? `\n\n## AGENDA DU JOUR\n${calendarEvents}` : ''
   return `Tu es Jarvis, l'assistant personnel de Gabriel Strodiot.
 
 ## QUI EST GABRIEL
@@ -188,7 +278,7 @@ function buildSystemPrompt(memory) {
 - Business en ligne : contenu Instagram, programmes, coaching 1-1
 - Vault Obsidian : son second cerveau (notes, idées, projets, systèmes)
 - Profil : ambitieux, direct, va à l'essentiel, aime les systèmes et l'automatisation
-- Outils : Make/Zapier, iPhone, VS Code, Railway, GitHub${facts}
+- Outils : Make/Zapier, iPhone, VS Code, Railway, GitHub${facts}${calendar}
 
 ## TA PERSONNALITÉ
 - Direct, concis, actionnable — pas de blabla, pas de listes inutiles
@@ -232,6 +322,9 @@ app.post('/chat', async (req, res) => {
   if (!message) return res.status(400).json({ error: 'Message requis' })
 
   const memory = loadMemory()
+  memory.facts = await loadFactsFromNotion()
+
+  const calendarEvents = await getCalendarEvents()
 
   let vaultContext = ''
   try {
@@ -247,7 +340,7 @@ app.post('/chat', async (req, res) => {
     const response = await claude.messages.create({
       model: 'claude-sonnet-4-5',
       max_tokens: 2048,
-      system: buildSystemPrompt(memory),
+      system: buildSystemPrompt(memory, calendarEvents),
       messages: [...historyMessages, { role: 'user', content: currentMessage }]
     })
 
@@ -348,6 +441,7 @@ app.post('/chat', async (req, res) => {
 
     reply = reply.trim()
     addToHistory(memory, 'assistant', reply)
+    await saveFactsToNotion(memory.facts)
     saveMemory(memory)
 
     res.json({
@@ -356,7 +450,8 @@ app.post('/chat', async (req, res) => {
       timestamp: new Date().toISOString(),
       noteCreated,
       notionCreated,
-      factsCount: memory.facts.length
+      factsCount: memory.facts.length,
+      calendarEvents
     })
 
   } catch (error) {
@@ -427,6 +522,13 @@ app.post('/notion/page', async (req, res) => {
   }
 })
 
+// ── ROUTE CALENDAR DIRECT ──────────────────────────────────────
+
+app.get('/calendar/today', async (req, res) => {
+  const events = await getCalendarEvents()
+  res.json({ events })
+})
+
 // ── SANTÉ ──────────────────────────────────────────────────────
 
 app.get('/health', (req, res) => {
@@ -435,7 +537,8 @@ app.get('/health', (req, res) => {
     timestamp: new Date().toISOString(),
     integrations: {
       notion: !!NOTION_TOKEN,
-      vault: !!VAULT_PATH
+      vault: !!VAULT_PATH,
+      googleCalendar: fs.existsSync(TOKEN_FILE)
     }
   })
 })
@@ -446,4 +549,5 @@ app.listen(PORT, () => {
   console.log(`📁 Vault Obsidian : ${VAULT_PATH}`)
   console.log(`🧠 Mémoire : ${MEMORY_FILE}`)
   console.log(`📄 Notion : ${NOTION_TOKEN ? '✅ connecté' : '❌ token manquant'}`)
+  console.log(`📅 Google Calendar : ${fs.existsSync(TOKEN_FILE) ? '✅ connecté' : '⚠️ non autorisé — visite http://localhost:3000/auth/google'}`)
 })
