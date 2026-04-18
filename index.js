@@ -11,6 +11,7 @@ const claude = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 const VAULT_PATH = process.env.VAULT_PATH
 const MEMORY_FILE = path.join(__dirname, 'memory.json')
 const NOTION_TOKEN = process.env.NOTION_TOKEN
+const NOTION_ROOT_PAGE = process.env.NOTION_ROOT_PAGE || '346a16a5-dea2-8068-86dd-c2c058d03572'
 
 // ── MÉMOIRE ────────────────────────────────────────────────────
 
@@ -115,21 +116,13 @@ async function notionCreatePage(parentId, title, content, isDatabase = false) {
   return notionRequest('POST', '/pages', body)
 }
 
-// Crée une page Notion standalone (sans parent spécifique)
+// Crée une page Notion dans la page root Jarvis
 async function notionCreateStandalonePage(title, content) {
-  // Cherche d'abord si une page parente existe dans le workspace
-  const searchResults = await notionSearch('')
-  const firstPage = searchResults.find(r => r.object === 'page' || r.object === 'database')
-
   const blocks = contentToNotionBlocks(content)
   const body = {
-    parent: firstPage
-      ? { page_id: firstPage.id }
-      : { type: 'workspace', workspace: true },
+    parent: { page_id: NOTION_ROOT_PAGE },
     properties: {
-      title: {
-        title: [{ text: { content: title } }]
-      }
+      title: { title: [{ text: { content: title } }] }
     },
     children: blocks
   }
