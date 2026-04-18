@@ -8,79 +8,144 @@ const app = express()
 app.use(express.json())
 
 const claude = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
-
 const VAULT_PATH = process.env.VAULT_PATH
 
-// Fonction pour écrire une note dans Obsidian
+// ── VAULT HELPERS ──────────────────────────────────────────────
+
 function writeNote(filename, content) {
   const inboxPath = path.join(VAULT_PATH, '00_Jarvis', 'Inbox')
+  if (!fs.existsSync(inboxPath)) fs.mkdirSync(inboxPath, { recursive: true })
   const filepath = path.join(inboxPath, filename)
   fs.writeFileSync(filepath, content, 'utf8')
   return filepath
 }
 
-// Route principale : parler à Jarvis
-app.post('/chat', async (req, res) => {
-  const { message } = req.body
-  
-  if (!message) {
-    return res.status(400).json({ error: 'Message requis' })
-  }
+function readNote(filename) {
+  const inboxPath = path.join(VAULT_PATH, '00_Jarvis', 'Inbox')
+  const filepath = path.join(inboxPath, filename)
+  if (!fs.existsSync(filepath)) return null
+  return fs.readFileSync(filepath, 'utf8')
+}
 
-  try {
-    const response = await claude.messages.create({
-      model: 'claude-sonnet-4-5',
-      max_tokens: 1024,
-      system: `system: `Tu es Jarvis, l'assistant personnel de Gabriel Strodiot.
+function listRecentNotes(n = 5) {
+  const inboxPath = path.join(VAULT_PATH, '00_Jarvis', 'Inbox')
+  if (!fs.existsSync(inboxPath)) return []
+  return fs.readdirSync(inboxPath)
+    .filter(f => f.endsWith('.md'))
+    .map(f => ({
+      name: f,
+      modified: fs.statSync(path.join(inboxPath, f)).mtime
+    }))
+    .sort((a, b) => b.modified - a.modified)
+    .slice(0, n)
+    .map(f => f.name)
+}
+
+function searchNotes(query) {
+  const inboxPath = path.join(VAULT_PATH, '00_Jarvis', 'Inbox')
+  if (!fs.existsSync(inboxPath)) return []
+  const results = []
+  const files = fs.readdirSync(inboxPath).filter(f => f.endsWith('.md'))
+  for (const file of files) {
+    const content = fs.readFileSync(path.join(inboxPath, file), 'utf8')
+    if (content.toLowerCase().includes(query.toLowerCase()) ||
+        file.toLowerCase().includes(query.toLowerCase())) {
+      results.push({ file, preview: content.slice(0, 200) })
+    }
+  }
+  return results
+}
+
+// ── SYSTEM PROMPT ──────────────────────────────────────────────
+
+const SYSTEM_PROMPT = `Tu es Jarvis, l'assistant personnel de Gabriel Strodiot.
 
 ## QUI EST GABRIEL
 - Coach fitness et lifestyle, 25 ans, basé en Belgique
-- Créateur de la méthode FLOW — une approche de transformation physique et mentale pour hommes 20-35 ans
+- Créateur de la méthode FLOW — transformation physique et mentale pour hommes 20-35 ans
 - Business en ligne : contenu Instagram, programmes, coaching 1-1
 - Vault Obsidian : son second cerveau (notes, idées, projets, systèmes)
 - Profil : ambitieux, direct, va à l'essentiel, aime les systèmes et l'automatisation
 - Outils : Make/Zapier, iPhone, VS Code, Railway, GitHub
 
 ## TA PERSONNALITÉ
-- Tu parles comme un assistant de confiance, pas comme un chatbot corporate
 - Direct, concis, actionnable — pas de blabla, pas de listes inutiles
-- Tu anticipes les besoins de Gabriel plutôt que d'attendre
+- Tu anticipes les besoins plutôt que d'attendre
 - Tu peux challenger ses idées si tu vois mieux
 - Ton ton : entre un CTO de startup et un coach de haut niveau
 - Tu tutoies toujours Gabriel
 
-## TES CAPACITÉS
-- Écrire des notes dans le Vault Obsidian de Gabriel (dossier Inbox)
-- Répondre à des questions complexes sur le business, le fitness, le code
-- Aider à structurer des projets, des workflows, des systèmes
-- Générer du contenu (scripts Instagram, emails, idées de contenu)
-- Débugger du code Node.js/JavaScript
+## TES CAPACITÉS VAULT
+- Pour écrire une note : réponds avec [WRITE_NOTE: titre du sujet] sur une ligne seule
+- Pour lire les notes récentes : réponds avec [LIST_NOTES] sur une ligne seule
+- Pour chercher dans le vault : réponds avec [SEARCH_NOTES: mot-clé] sur une ligne seule
+- Tu peux combiner une commande vault ET du texte dans ta réponse
 
 ## RÈGLES
 - Réponds TOUJOURS en français sauf si Gabriel écrit en anglais
-- Réponses courtes par défaut — développe seulement si Gabriel demande "explique" ou "détaille"
-- Si Gabriel dit "note ça" / "écris" / "sauvegarde" → tu crées une note Obsidian ET tu confirmes
-- Jamais de intro générique comme "Bien sûr !" ou "Absolument !" — va direct au contenu
-- Si tu ne sais pas quelque chose, dis-le directement sans t'excuser`,,
-      messages: [{ role: 'user', content: message }]
+- Réponses courtes par défaut — développe seulement si demandé
+- Si Gabriel dit "note ça" / "écris" / "sauvegarde" → utilise [WRITE_NOTE: ...]
+- Jamais de intro générique comme "Bien sûr !" ou "Absolument !"
+- Si tu ne sais pas quelque chose, dis-le directement sans t'excuser`
+
+// ── ROUTE PRINCIPALE ───────────────────────────────────────────
+
+app.post('/chat', async (req, res) => {
+  const { message } = req.body
+  if (!message) return res.status(400).json({ error: 'Message requis' })
+
+  // Contexte vault injecté dans chaque requête
+  let vaultContext = ''
+  try {
+    const recentNotes = listRecentNotes(3)
+    if (recentNotes.length > 0) {
+      vaultContext = `\n\n[Contexte vault — notes récentes dans ton Inbox : ${recentNotes.join(', ')}]`
+    }
+  } catch (e) { /* vault non accessible (prod) */ }
+
+  try {
+    const response = await claude.messages.create({
+      model: 'claude-sonnet-4-5',
+      max_tokens: 1024,
+      system: SYSTEM_PROMPT,
+      messages: [{ role: 'user', content: message + vaultContext }]
     })
 
-    const reply = response.content[0].text
+    let reply = response.content[0].text
+    let noteCreated = null
 
-    // Détecte si Jarvis doit écrire une note
-    if (message.toLowerCase().includes('note') || message.toLowerCase().includes('écris') || message.toLowerCase().includes('sauvegarde')) {
+    // Détecte commande WRITE_NOTE
+    const writeMatch = reply.match(/\[WRITE_NOTE:\s*(.+?)\]/i)
+    if (writeMatch) {
+      const title = writeMatch[1].trim()
       const date = new Date().toISOString().split('T')[0]
       const time = new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
-      const noteContent = `# Note Jarvis — ${date} ${time}\n\n${reply}\n\n---\n*Créé par Jarvis le ${date} à ${time}*`
-      const filename = `${date}-jarvis-note.md`
+      const cleanReply = reply.replace(/\[WRITE_NOTE:[^\]]+\]/i, '').trim()
+      const noteContent = `# ${title}\n\n${cleanReply}\n\n---\n*Créé par Jarvis le ${date} à ${time}*`
+      const filename = `${date}-${title.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')}.md`
       writeNote(filename, noteContent)
+      noteCreated = filename
+      reply = cleanReply + `\n\n📝 Note créée : \`${filename}\``
     }
 
-    res.json({ 
-      reply,
-      model: 'claude-sonnet-4-5',
-      timestamp: new Date().toISOString()
-    })
+    // Détecte commande LIST_NOTES
+    if (reply.includes('[LIST_NOTES]')) {
+      const notes = listRecentNotes(5)
+      const listText = notes.length > 0 ? notes.join('\n- ') : 'Aucune note trouvée'
+      reply = reply.replace('[LIST_NOTES]', `Notes récentes :\n- ${listText}`)
+    }
+
+    // Détecte commande SEARCH_NOTES
+    const searchMatch = reply.match(/\[SEARCH_NOTES:\s*(.+?)\]/i)
+    if (searchMatch) {
+      const results = searchNotes(searchMatch[1].trim())
+      const searchText = results.length > 0
+        ? results.map(r => `**${r.file}** : ${r.preview}...`).join('\n\n')
+        : 'Aucune note trouvée pour cette recherche'
+      reply = reply.replace(/\[SEARCH_NOTES:[^\]]+\]/i, searchText)
+    }
+
+    res.json({ reply, model: 'claude-sonnet-4-5', timestamp: new Date().toISOString(), noteCreated })
 
   } catch (error) {
     console.error('Erreur Claude:', error)
@@ -88,7 +153,29 @@ app.post('/chat', async (req, res) => {
   }
 })
 
-// Route de santé
+// ── ROUTES VAULT DIRECTES ──────────────────────────────────────
+
+app.get('/vault/notes', (req, res) => {
+  try {
+    const notes = listRecentNotes(20)
+    res.json({ notes })
+  } catch (e) {
+    res.status(500).json({ error: 'Vault non accessible' })
+  }
+})
+
+app.get('/vault/read/:filename', (req, res) => {
+  try {
+    const content = readNote(req.params.filename)
+    if (!content) return res.status(404).json({ error: 'Note introuvable' })
+    res.json({ filename: req.params.filename, content })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+// ── SANTÉ ──────────────────────────────────────────────────────
+
 app.get('/health', (req, res) => {
   res.json({ status: 'Jarvis is alive 🤖', timestamp: new Date().toISOString() })
 })
