@@ -13,6 +13,10 @@ const VAULT_PATH = process.env.VAULT_PATH
 const MEMORY_FILE = path.join(__dirname, 'memory.json')
 const NOTION_TOKEN = process.env.NOTION_TOKEN
 const NOTION_MEMORY_PAGE_ID = '346a16a5-dea2-811b-a3c2-e15932a2fb19'
+const NOTION_CHECKIN_PAGE_ID = '347a16a5-dea2-81a0-b479-cb00f2f6d772'
+const PUSHCUT_MORNING_URL = 'https://api.pushcut.io/SqkzZ_LTIkyZ00984Lh5F/notifications/Morning%20Briefing%20'
+const PUSHCUT_CHECKIN_URL = 'https://api.pushcut.io/SqkzZ_LTIkyZ00984Lh5F/notifications/%20Check%20up%20'
+const PUSHCUT_RECAP_URL = 'https://api.pushcut.io/SqkzZ_LTIkyZ00984Lh5F/notifications/%20R%C3%A9cap%20t%C3%A2ches%20'
 const TOKEN_FILE = path.join(__dirname, 'google_token.json')
 
 // ── GOOGLE OAUTH ───────────────────────────────────────────────
@@ -553,6 +557,113 @@ app.post('/notion/page', async (req, res) => {
       ? await notionCreatePage(parentId, title, content || '')
       : await notionCreateStandalonePage(title, content || '')
     res.json({ ok: true, id: page.id, url: page.url })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+// ── ROUTES JARVIS PROACTIF ─────────────────────────────────────
+
+app.post('/jarvis/checkin', async (req, res) => {
+  try {
+    // Lit l'historique des questions déjà posées
+    const page = await notionReadPage(NOTION_CHECKIN_PAGE_ID)
+    const previousQA = page.textContent
+
+    // Génère une nouvelle question inédite
+    const response = await claude.messages.create({
+      model: 'claude-sonnet-4-5',
+      max_tokens: 500,
+      system: `Tu es Jarvis, assistant personnel de Gabriel Strodiot (coach fitness 25 ans, Belgique, méthode FLOW, business en ligne).
+Tu poses UNE question personnelle courte et précise pour mieux connaître Gabriel.
+Règles :
+- Ne jamais répéter une question déjà posée
+- Varier les thèmes : objectifs, santé, business, relations, mindset, finances, habitudes
+- Question courte (1 phrase max)
+- Ton direct, pas condescendant
+- Réponds UNIQUEMENT avec la question, rien d'autre`,
+      messages: [{
+        role: 'user',
+        content: `Voici les questions déjà posées :\n${previousQA}\n\nGénère une nouvelle question inédite.`
+      }]
+    })
+
+    const question = response.content[0].text.trim()
+
+    // Envoie la notification Pushcut
+    await fetch(PUSHCUT_CHECKIN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: '🤖 Jarvis — Question du jour',
+        text: question
+      })
+    })
+
+    // Stocke la question dans Notion (sans réponse pour l'instant)
+    const date = new Date().toLocaleDateString('fr-FR')
+    await notionAppendToPage(NOTION_CHECKIN_PAGE_ID, `## ${date}\n**Q : ${question}**\nR : *En attente*`)
+
+    res.json({ ok: true, question })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.post('/jarvis/checkin/answer', async (req, res) => {
+  try {
+    const { answer, question } = req.body
+    if (!answer) return res.status(400).json({ error: 'Réponse requise' })
+
+    const date = new Date().toLocaleDateString('fr-FR')
+    const content = question
+      ? `## ${date}\n**Q : ${question}**\nR : ${answer}`
+      : `## ${date}\nR : ${answer}`
+
+    await notionAppendToPage(NOTION_CHECKIN_PAGE_ID, content)
+
+    // Sauvegarde aussi dans la mémoire long terme
+    const memory = loadMemory()
+    memory.facts = await loadFactsFromNotion()
+    const fact = question ? `${question} → ${answer}` : answer
+    if (!memory.facts.includes(fact)) memory.facts.push(fact)
+    await saveFactsToNotion(memory.facts)
+    saveMemory(memory)
+
+    res.json({ ok: true, message: 'Réponse enregistrée dans Notion et mémoire' })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.post('/jarvis/recap', async (req, res) => {
+  try {
+    const calendarEvents = await getCalendarEvents()
+    const memory = loadMemory()
+    memory.facts = await loadFactsFromNotion()
+
+    const response = await claude.messages.create({
+      model: 'claude-sonnet-4-5',
+      max_tokens: 500,
+      system: buildSystemPrompt(memory, calendarEvents, null),
+      messages: [{
+        role: 'user',
+        content: 'Fais un récap ultra court de la journée : ce qui était prévu, ce qui a pu être fait ou raté, et 1 action clé pour demain. Max 5 lignes.'
+      }]
+    })
+
+    const recap = response.content[0].text.trim()
+
+    await fetch(PUSHCUT_RECAP_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: '✅ Jarvis — Récap de la journée',
+        text: recap
+      })
+    })
+
+    res.json({ ok: true, recap })
   } catch (e) {
     res.status(500).json({ error: e.message })
   }
