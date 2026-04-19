@@ -1,8 +1,6 @@
 {
   "profile": {},
-  "facts": [
-    "Objectif principal 2026 = 10 clients coaching actifs"
-  ],
+  "facts": [],
   "history": [
     {
       "role": "user",
@@ -13,6 +11,16 @@
       "role": "assistant",
       "content": "Noté. Ça va demander une stratégie d'acquisition claire.\n\nJe vois que tu prépares le lancement FLOW mai 2026. Tu veux qu'on construise un système pour convertir ton audience Instagram vers ces places coaching ? \n\nGenre : contenu → lead magnet → appel découverte → closing ?",
       "timestamp": "2026-04-18T20:25:52.622Z"
+    },
+    {
+      "role": "user",
+      "content": "quels sont mes mails non lus ?",
+      "timestamp": "2026-04-19T05:46:09.738Z"
+    },
+    {
+      "role": "assistant",
+      "content": "Voici tes mails non lus :\n\n1. **Railway** - Start Collecting Referral Credits\n2. **LE LABO IA (BASIC) (Skool)** - 1 nouvelle notif depuis 15h30 (18 avril)\n3. **Gamma** - Améliore tes présentations avec des visuels\n4. **Growth Secrets (Skool)** - Digest hebdo (10 avril)\n5. **BrandStart (Skool)** - Digest hebdo (10 avril)\n\nRien d'urgent. Les 3 derniers sont des digests Skool que tu peux probablement archiver. Railway c'est juste leur promo affiliation.\n\nLe seul qui pourrait avoir de la valeur c'est LE LABO IA si t'es actif dessus.\n\nTu veux que je te rappelle de checker le Labo IA ou on passe à autre chose ?",
+      "timestamp": "2026-04-19T05:46:14.863Z"
     }
   ]
 }

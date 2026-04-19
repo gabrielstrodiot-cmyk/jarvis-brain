@@ -28,6 +28,37 @@ if (fs.existsSync(TOKEN_FILE)) {
   oauth2Client.setCredentials(token)
 }
 
+async function getGmailUnread() {
+  try {
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client })
+    const response = await gmail.users.messages.list({
+      userId: 'me',
+      q: 'is:unread is:inbox',
+      maxResults: 5
+    })
+
+    const messages = response.data.messages || []
+    if (messages.length === 0) return 'Aucun mail non lu.'
+
+    const details = await Promise.all(messages.map(async (msg) => {
+      const full = await gmail.users.messages.get({
+        userId: 'me',
+        id: msg.id,
+        format: 'metadata',
+        metadataHeaders: ['From', 'Subject']
+      })
+      const headers = full.data.payload.headers
+      const from = headers.find(h => h.name === 'From')?.value || 'Inconnu'
+      const subject = headers.find(h => h.name === 'Subject')?.value || 'Sans objet'
+      return `- ${from} : ${subject}`
+    }))
+
+    return details.join('\n')
+  } catch (e) {
+    return 'Gmail non connecté.'
+  }
+}
+
 async function getCalendarEvents() {
   try {
     const calendar = google.calendar({ version: 'v3', auth: oauth2Client })
@@ -62,7 +93,10 @@ async function getCalendarEvents() {
 app.get('/auth/google', (req, res) => {
   const url = oauth2Client.generateAuthUrl({
     access_type: 'offline',
-    scope: ['https://www.googleapis.com/auth/calendar.readonly'],
+    scope: [
+  'https://www.googleapis.com/auth/calendar.readonly',
+  'https://www.googleapis.com/auth/gmail.readonly'
+],
     prompt: 'consent'
   })
   res.redirect(url)
@@ -267,9 +301,10 @@ async function notionAppendToPage(pageId, content) {
 
 // ── SYSTEM PROMPT ──────────────────────────────────────────────
 
-function buildSystemPrompt(memory, calendarEvents) {
+function buildSystemPrompt(memory, calendarEvents, gmailUnread) {
   const facts = formatFactsForPrompt(memory)
   const calendar = calendarEvents ? `\n\n## AGENDA DU JOUR\n${calendarEvents}` : ''
+const gmail = gmailUnread ? `\n\n## MAILS NON LUS\n${gmailUnread}` : ''
   return `Tu es Jarvis, l'assistant personnel de Gabriel Strodiot.
 
 ## QUI EST GABRIEL
@@ -278,7 +313,7 @@ function buildSystemPrompt(memory, calendarEvents) {
 - Business en ligne : contenu Instagram, programmes, coaching 1-1
 - Vault Obsidian : son second cerveau (notes, idées, projets, systèmes)
 - Profil : ambitieux, direct, va à l'essentiel, aime les systèmes et l'automatisation
-- Outils : Make/Zapier, iPhone, VS Code, Railway, GitHub${facts}${calendar}
+- Outils : Make/Zapier, iPhone, VS Code, Railway, GitHub${facts}${calendar}${gmail}
 
 ## TA PERSONNALITÉ
 - Direct, concis, actionnable — pas de blabla, pas de listes inutiles
@@ -325,6 +360,7 @@ app.post('/chat', async (req, res) => {
   memory.facts = await loadFactsFromNotion()
 
   const calendarEvents = await getCalendarEvents()
+  const gmailUnread = await getGmailUnread()
 
   let vaultContext = ''
   try {
@@ -340,7 +376,7 @@ app.post('/chat', async (req, res) => {
     const response = await claude.messages.create({
       model: 'claude-sonnet-4-5',
       max_tokens: 2048,
-      system: buildSystemPrompt(memory, calendarEvents),
+      system: buildSystemPrompt(memory, calendarEvents, gmailUnread),
       messages: [...historyMessages, { role: 'user', content: currentMessage }]
     })
 
