@@ -1,3 +1,5 @@
 node_modules/
 .env
+*.json.bak
+.DS_Store
 google_token.json
