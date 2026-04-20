@@ -1,3 +1,8 @@
+#!/bin/bash
+set -e
+
+# src/routes/voice.js — endpoint vocal complet
+cat > src/routes/voice.js << 'EOF'
 const express = require('express')
 const router = express.Router()
 const multer = require('multer')
@@ -160,3 +165,6 @@ router.post('/test', async (req, res) => {
 })
 
 module.exports = router
+EOF
+
+echo "✅ voice.js mis à jour"
