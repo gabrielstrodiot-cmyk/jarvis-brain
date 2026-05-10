@@ -1,5 +1,6 @@
 const notion = require('./notion')
 const memory = require('./memory')
+const obsidian = require('./obsidian')
 
 async function processReply(reply) {
   let text = reply
@@ -11,6 +12,50 @@ async function processReply(reply) {
     text = text.replace(match[0], '')
   }
 
+  // OBSIDIAN
+  const obsidianReadMatch = text.match(/\[OBSIDIAN_READ:\s*(.+?)\]/i)
+  if (obsidianReadMatch) {
+    try {
+      const content = await obsidian.readNote(obsidianReadMatch[1].trim())
+      text = text.replace(/\[OBSIDIAN_READ:[^\]]+\]/i, content.slice(0, 2000))
+    } catch (e) {
+      text = text.replace(/\[OBSIDIAN_READ:[^\]]+\]/i, `Note introuvable : ${e.message}`)
+    }
+  }
+
+  const obsidianListMatch = text.match(/\[OBSIDIAN_LIST:\s*(.+?)\]/i)
+  if (obsidianListMatch) {
+    try {
+      const files = await obsidian.listFolder(obsidianListMatch[1].trim())
+      text = text.replace(/\[OBSIDIAN_LIST:[^\]]+\]/i, files.join('\n') || 'Dossier vide')
+    } catch (e) {
+      text = text.replace(/\[OBSIDIAN_LIST:[^\]]+\]/i, `Erreur : ${e.message}`)
+    }
+  }
+
+  const obsidianWriteMatch = text.match(/\[OBSIDIAN_WRITE:\s*(.+?)\s*\|\s*([\s\S]+?)\]/i)
+  if (obsidianWriteMatch) {
+    try {
+      await obsidian.writeNote(obsidianWriteMatch[1].trim(), obsidianWriteMatch[2].trim())
+      text = text.replace(/\[OBSIDIAN_WRITE:[\s\S]+?\]/i, '').trim()
+      text += `\nNote écrite : ${obsidianWriteMatch[1].trim()}`
+    } catch (e) {
+      text = text.replace(/\[OBSIDIAN_WRITE:[\s\S]+?\]/i, '').trim()
+      text += `\nErreur écriture : ${e.message}`
+    }
+  }
+
+  const obsidianSearchMatch = text.match(/\[OBSIDIAN_SEARCH:\s*(.+?)\]/i)
+  if (obsidianSearchMatch) {
+    try {
+      const results = await obsidian.searchNotes(obsidianSearchMatch[1].trim())
+      text = text.replace(/\[OBSIDIAN_SEARCH:[^\]]+\]/i, results.join('\n') || 'Aucun résultat')
+    } catch (e) {
+      text = text.replace(/\[OBSIDIAN_SEARCH:[^\]]+\]/i, `Erreur : ${e.message}`)
+    }
+  }
+
+  // NOTION
   const notionCreateMatch = text.match(/\[NOTION_CREATE:\s*(.+?)\s*\|\s*([\s\S]+?)\]/i)
   if (notionCreateMatch) {
     const title = notionCreateMatch[1].trim()
@@ -19,10 +64,10 @@ async function processReply(reply) {
       const page = await notion.createPage(title, content)
       sideEffects.notionCreated = { title, url: page.url || '' }
       text = text.replace(/\[NOTION_CREATE:[\s\S]+?\]/i, '').trim()
-      text += `\n\n📄 Page Notion créée : **${title}**${page.url ? `\n🔗 ${page.url}` : ''}`
+      text += `\nPage Notion créée : ${title}${page.url ? `\n${page.url}` : ''}`
     } catch (e) {
       text = text.replace(/\[NOTION_CREATE:[\s\S]+?\]/i, '').trim()
-      text += `\n\n❌ Erreur Notion : ${e.message}`
+      text += `\nErreur Notion : ${e.message}`
     }
   }
 
@@ -61,14 +106,14 @@ async function processReply(reply) {
       if (results.length > 0) {
         await notion.appendToPage(results[0].id, content)
         text = text.replace(/\[NOTION_APPEND:[\s\S]+?\]/i, '').trim()
-        text += `\n\n✅ Ajouté à **${pageName}**`
+        text += `\nAjouté à ${pageName}`
       } else {
         text = text.replace(/\[NOTION_APPEND:[\s\S]+?\]/i, '').trim()
-        text += `\n\n❌ Page "${pageName}" introuvable`
+        text += `\nPage "${pageName}" introuvable`
       }
     } catch (e) {
       text = text.replace(/\[NOTION_APPEND:[\s\S]+?\]/i, '').trim()
-      text += `\n\n❌ Erreur : ${e.message}`
+      text += `\nErreur : ${e.message}`
     }
   }
 

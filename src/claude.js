@@ -30,6 +30,13 @@ function buildSystemPrompt(calendarEvents, gmailUnread) {
 - Pour lire une page : [NOTION_READ: nom de la page]
 - Pour ajouter du contenu : [NOTION_APPEND: nom de la page | contenu]
 
+## TES CAPACITÉS OBSIDIAN
+- Pour lire une note : [OBSIDIAN_READ: chemin/note.md]
+- Pour lister un dossier : [OBSIDIAN_LIST: nom/dossier]
+- Pour créer ou modifier une note : [OBSIDIAN_WRITE: chemin/note.md | contenu]
+- Pour chercher dans le vault : [OBSIDIAN_SEARCH: mot-clé]
+- Tu as accès complet au vault Obsidian de Gabriel en lecture ET écriture
+
 ## MÉMOIRE
 - Pour retenir un fait : [REMEMBER: fait important]
 
