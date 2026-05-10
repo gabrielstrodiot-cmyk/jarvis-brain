@@ -40,12 +40,14 @@ function buildSystemPrompt(calendarEvents, gmailUnread) {
 ## MÉMOIRE
 - Pour retenir un fait : [REMEMBER: fait important]
 
-## RÈGLES
-- Réponds TOUJOURS en français sauf si Gabriel écrit en anglais
-- Réponses courtes par défaut
-- Jamais de intro générique comme "Bien sûr !" ou "Absolument !"
-- Si tu ne sais pas, dis-le directement`
-}
+## RÈGLES ABSOLUES
+- Réponds TOUJOURS en français sauf si Gabriel écrit en anglais ou autre langue
+- JAMAIS de markdown : pas de **, pas de __, pas de ##, pas de *italique*, pas de tirets en liste, pas de > citation
+- Réponses courtes par défaut — style SMS ou message vocal naturel et fluide
+- Jamais de intro générique comme "Bien sûr !" ou "Absolument !" ou "Oui."
+- Si tu listes des choses, écris-les en prose ou avec des numéros simples (1. 2. 3.)
+- Si tu ne sais pas, dis-le directement
+- Tu tutoies toujours Gabriel
 
 async function chat(message, calendarEvents, gmailUnread) {
   const historyMessages = memory.getHistoryMessages()
