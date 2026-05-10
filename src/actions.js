@@ -5,6 +5,7 @@ const obsidian = require('./obsidian')
 async function processReply(reply) {
   let text = reply
   const sideEffects = {}
+  const fetchedData = {}
 
   const rememberMatches = [...text.matchAll(/\[REMEMBER:\s*(.+?)\]/gi)]
   for (const match of rememberMatches) {
@@ -12,14 +13,16 @@ async function processReply(reply) {
     text = text.replace(match[0], '')
   }
 
-  // OBSIDIAN
+  // OBSIDIAN — stocke dans fetchedData au lieu de remplacer inline
   const obsidianReadMatch = text.match(/\[OBSIDIAN_READ:\s*(.+?)\]/i)
   if (obsidianReadMatch) {
     try {
       const content = await obsidian.readNote(obsidianReadMatch[1].trim())
-      text = text.replace(/\[OBSIDIAN_READ:[^\]]+\]/i, content.slice(0, 2000))
+      fetchedData.obsidianRead = `Note "${obsidianReadMatch[1].trim()}":\n${content.slice(0, 3000)}`
+      text = text.replace(/\[OBSIDIAN_READ:[^\]]+\]/i, '')
     } catch (e) {
-      text = text.replace(/\[OBSIDIAN_READ:[^\]]+\]/i, `Note introuvable : ${e.message}`)
+      fetchedData.obsidianRead = `Note introuvable : ${e.message}`
+      text = text.replace(/\[OBSIDIAN_READ:[^\]]+\]/i, '')
     }
   }
 
@@ -27,9 +30,23 @@ async function processReply(reply) {
   if (obsidianListMatch) {
     try {
       const files = await obsidian.listFolder(obsidianListMatch[1].trim())
-      text = text.replace(/\[OBSIDIAN_LIST:[^\]]+\]/i, files.join('\n') || 'Dossier vide')
+      fetchedData.obsidianList = `Dossier "${obsidianListMatch[1].trim()}":\n${files.join('\n') || 'Vide'}`
+      text = text.replace(/\[OBSIDIAN_LIST:[^\]]+\]/i, '')
     } catch (e) {
-      text = text.replace(/\[OBSIDIAN_LIST:[^\]]+\]/i, `Erreur : ${e.message}`)
+      fetchedData.obsidianList = `Erreur : ${e.message}`
+      text = text.replace(/\[OBSIDIAN_LIST:[^\]]+\]/i, '')
+    }
+  }
+
+  const obsidianSearchMatch = text.match(/\[OBSIDIAN_SEARCH:\s*(.+?)\]/i)
+  if (obsidianSearchMatch) {
+    try {
+      const results = await obsidian.searchNotes(obsidianSearchMatch[1].trim())
+      fetchedData.obsidianSearch = `Résultats recherche "${obsidianSearchMatch[1].trim()}":\n${results.join('\n') || 'Aucun résultat'}`
+      text = text.replace(/\[OBSIDIAN_SEARCH:[^\]]+\]/i, '')
+    } catch (e) {
+      fetchedData.obsidianSearch = `Erreur : ${e.message}`
+      text = text.replace(/\[OBSIDIAN_SEARCH:[^\]]+\]/i, '')
     }
   }
 
@@ -42,16 +59,6 @@ async function processReply(reply) {
     } catch (e) {
       text = text.replace(/\[OBSIDIAN_WRITE:[\s\S]+?\]/i, '').trim()
       text += `\nErreur écriture : ${e.message}`
-    }
-  }
-
-  const obsidianSearchMatch = text.match(/\[OBSIDIAN_SEARCH:\s*(.+?)\]/i)
-  if (obsidianSearchMatch) {
-    try {
-      const results = await obsidian.searchNotes(obsidianSearchMatch[1].trim())
-      text = text.replace(/\[OBSIDIAN_SEARCH:[^\]]+\]/i, results.join('\n') || 'Aucun résultat')
-    } catch (e) {
-      text = text.replace(/\[OBSIDIAN_SEARCH:[^\]]+\]/i, `Erreur : ${e.message}`)
     }
   }
 
@@ -88,7 +95,8 @@ async function processReply(reply) {
       const results = await notion.search(notionReadMatch[1].trim())
       if (results.length > 0) {
         const page = await notion.readPage(results[0].id)
-        text = text.replace(/\[NOTION_READ:[^\]]+\]/i, page.textContent.slice(0, 1000) || 'Page vide')
+        fetchedData.notionRead = `Page Notion "${notionReadMatch[1].trim()}":\n${page.textContent.slice(0, 1000)}`
+        text = text.replace(/\[NOTION_READ:[^\]]+\]/i, '')
       } else {
         text = text.replace(/\[NOTION_READ:[^\]]+\]/i, 'Page introuvable')
       }
@@ -117,7 +125,7 @@ async function processReply(reply) {
     }
   }
 
-  return { text: text.trim(), sideEffects }
+  return { text: text.trim(), sideEffects, fetchedData }
 }
 
 module.exports = { processReply }

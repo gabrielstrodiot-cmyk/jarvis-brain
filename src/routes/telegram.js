@@ -105,12 +105,25 @@ async function handleMessage(chatId, text) {
   ])
 
   const rawReply = await claudeClient.chat(text, calendarEvents, gmailUnread)
-  const { text: reply } = await actions.processReply(rawReply)
+  const { text: processedReply, fetchedData } = await actions.processReply(rawReply)
 
-  memory.addToHistory('assistant', reply)
+  let finalReply = processedReply
+
+  // Deux passes : si données fetchées, re-synthétise avec Claude
+  if (fetchedData && Object.keys(fetchedData).length > 0) {
+    const dataContext = Object.values(fetchedData).join('\n\n')
+    const synthesisPrompt = `Gabriel a demandé : "${text}"\n\nDonnées récupérées :\n\n${dataContext}\n\nRéponds à Gabriel de façon naturelle et concise.`
+    finalReply = await claudeClient.generate(
+      claudeClient.buildSystemPrompt(calendarEvents, gmailUnread),
+      synthesisPrompt,
+      1000
+    )
+  }
+
+  memory.addToHistory('assistant', finalReply)
   await memory.persist()
 
-  return reply
+  return finalReply
 }
 
 // ── MORNING BRIEFING ──────────────────────────────────────────
