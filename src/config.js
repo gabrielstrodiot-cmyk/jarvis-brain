@@ -12,8 +12,8 @@ const config = {
     token: process.env.NOTION_TOKEN,
     memoryPageId: '346a16a5-dea2-811b-a3c2-e15932a2fb19',
     checkinPageId: '347a16a5-dea2-81a0-b479-cb00f2f6d772',
-    tasksDbId: '4cd0f97ca4af448c907f7d73c3327c60',
-    projectsDbId: '8e6654ecd5b9425c96493e2a4f8129c4',
+    tasksDbId: '35ca16a5-dea2-8078-9221-cc2617577a41',
+    projectsDbId: '346a16a5-dea2-81cf-b4db-e032fae39308',
   },
   google: {
     clientId: process.env.GOOGLE_CLIENT_ID,
