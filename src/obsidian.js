@@ -34,6 +34,28 @@ async function writeNote(path, content, commitMessage = 'Jarvis: mise à jour no
   if (!res.ok) throw new Error(`Erreur écriture: ${await res.text()}`);
   return true;
 }
+// Trouve le chemin exact d'une note par son nom
+async function findNote(name) {
+  const res = await fetch(`${BASE_URL}/repos/${REPO}/git/trees/HEAD?recursive=1`, { headers });
+  if (!res.ok) throw new Error('Impossible de lister le vault');
+  const data = await res.json();
+  const query = name.toLowerCase().replace('.md', '');
+  const match = data.tree.find(f => 
+    f.type === 'blob' && 
+    f.path.endsWith('.md') && 
+    f.path.toLowerCase().includes(query)
+  );
+  if (!match) throw new Error(`Note introuvable : ${name}`);
+  return match.path;
+}
+
+async function readNote(name) {
+  const path = await findNote(name);
+  const res = await fetch(`${BASE_URL}/repos/${REPO}/contents/${encodeURIComponent(path)}?ref=${BRANCH}`, { headers });
+  if (!res.ok) throw new Error(`Erreur lecture : ${path}`);
+  const data = await res.json();
+  return Buffer.from(data.content, 'base64').toString('utf-8');
+}
 
 async function searchNotes(query) {
   const res = await fetch(`${BASE_URL}/search/code?q=${encodeURIComponent(query)}+repo:${REPO}+extension:md`, { headers });
