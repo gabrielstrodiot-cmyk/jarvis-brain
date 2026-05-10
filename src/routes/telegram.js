@@ -10,8 +10,9 @@ const claudeClient = require('../claude')
 const memory = require('../memory')
 const actions = require('../actions')
 const { getCalendarEvents, getGmailUnread } = require('../google')
-
 const bot = new TelegramBot(config.telegram.botToken, { polling: true })
+const notion = require('../notion')
+const obsidian = require('../obsidian')
 
 let GABRIEL_CHAT_ID = process.env.TELEGRAM_CHAT_ID || null
 
@@ -137,22 +138,27 @@ async function sendMorningBriefing() {
   try {
     console.log('🌅 Envoi morning briefing...')
     await memory.load()
-    const [calendarEvents, gmailUnread] = await Promise.all([
+    const [calendarEvents, gmailUnread, tasks, projects, obsidianNote] = await Promise.all([
       getCalendarEvents(),
       getGmailUnread(),
+      notion.getActiveTasks(),
+      notion.getActiveProjects(),
+      obsidian.getRandomNote(),
     ])
 
     const prompt = `Génère mon morning briefing du jour. Sois concis et direct. Inclus :
 1. Mon agenda aujourd'hui et demain
 2. Mails importants non lus
-3. Rappel morning routine
-4. Une intention pour la journée
+3. Tâches prioritaires du jour
+4. État des projets actifs
+5. Leçon du jour en 2 phrases (synthèse de la note Obsidian fournie)
+6. Rappel morning routine
 
-Format : texte court, pas de markdown, max 150 mots.`
+Format : texte fluide, pas de markdown, max 200 mots.`
 
-    const rawReply = await claudeClient.chat(prompt, calendarEvents, gmailUnread)
+    const rawReply = await claudeClient.chat(prompt, calendarEvents, gmailUnread, tasks, projects, obsidianNote)
     const { text: reply } = await actions.processReply(rawReply)
-
+    
     await bot.sendMessage(chatId, `🌅 Morning Briefing\n\n${reply}`)
     await sendVoiceReply(chatId, reply)
 

@@ -4,10 +4,14 @@ const memory = require('./memory')
 
 const client = new Anthropic({ apiKey: config.anthropic.apiKey })
 
-function buildSystemPrompt(calendarEvents, gmailUnread) {
+function buildSystemPrompt(calendarEvents, gmailUnread, tasks, projects, obsidianNote) {
   const facts = memory.formatFactsForPrompt()
   const calendar = calendarEvents ? `\n\n## AGENDA DU JOUR\n${calendarEvents}` : ''
   const gmail = gmailUnread ? `\n\n## MAILS NON LUS\n${gmailUnread}` : ''
+  const tasksSection = tasks ? `\n\n## TÂCHES ACTIVES\n${tasks}` : ''
+  const projectsSection = projects ? `\n\n## PROJETS EN COURS\n${projects}` : ''
+  const obsidianSection = obsidianNote ? `\n\n## NOTE OBSIDIAN DU JOUR (${obsidianNote.name})\n${obsidianNote.preview}` : ''
+
   return `Tu es Jarvis, l'assistant personnel de Gabriel Strodiot.
 
 ## QUI EST GABRIEL
@@ -15,7 +19,7 @@ function buildSystemPrompt(calendarEvents, gmailUnread) {
 - Créateur de la méthode FLOW — transformation physique et mentale pour hommes 20-35 ans
 - Business en ligne : contenu Instagram, programmes, coaching 1-1
 - Profil : ambitieux, direct, va à l'essentiel, aime les systèmes et l'automatisation
-- Outils : Make, iPhone, VS Code, Railway, GitHub, Notion${facts}${calendar}${gmail}
+- Outils : Make, iPhone, VS Code, Railway, GitHub, Notion${facts}${calendar}${gmail}${tasksSection}${projectsSection}${obsidianSection}
 
 ## TA PERSONNALITÉ
 - Direct, concis, actionnable
@@ -35,7 +39,6 @@ function buildSystemPrompt(calendarEvents, gmailUnread) {
 - Pour lister un dossier : [OBSIDIAN_LIST: nom/dossier]
 - Pour créer ou modifier une note : [OBSIDIAN_WRITE: chemin/note.md | contenu]
 - Pour chercher dans le vault : [OBSIDIAN_SEARCH: mot-clé]
-- Tu as accès complet au vault Obsidian de Gabriel en lecture ET écriture
 
 ## MÉMOIRE
 - Pour retenir un fait : [REMEMBER: fait important]
@@ -49,13 +52,13 @@ function buildSystemPrompt(calendarEvents, gmailUnread) {
 - Si tu ne sais pas, dis-le directement`
 }
 
-async function chat(message, calendarEvents, gmailUnread) {
+async function chat(message, calendarEvents = null, gmailUnread = null, tasks = null, projects = null, obsidianNote = null) {
   const historyMessages = memory.getHistoryMessages()
   memory.addToHistory('user', message)
   const response = await client.messages.create({
     model: 'claude-sonnet-4-5',
     max_tokens: 2048,
-    system: buildSystemPrompt(calendarEvents, gmailUnread),
+    system: buildSystemPrompt(calendarEvents, gmailUnread, tasks, projects, obsidianNote),
     messages: [...historyMessages, { role: 'user', content: message }],
   })
   return response.content[0].text

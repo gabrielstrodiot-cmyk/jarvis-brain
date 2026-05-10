@@ -12,6 +12,8 @@ const config = {
     token: process.env.NOTION_TOKEN,
     memoryPageId: '346a16a5-dea2-811b-a3c2-e15932a2fb19',
     checkinPageId: '347a16a5-dea2-81a0-b479-cb00f2f6d772',
+    tasksDbId: '4cd0f97ca4af448c907f7d73c3327c60',
+    projectsDbId: '8e6654ecd5b9425c96493e2a4f8129c4',
   },
   google: {
     clientId: process.env.GOOGLE_CLIENT_ID,
@@ -19,9 +21,7 @@ const config = {
     redirectUri: process.env.GOOGLE_REDIRECT_URI || 'http://localhost:3000/auth/callback',
     refreshToken: process.env.GOOGLE_REFRESH_TOKEN,
   },
-  telegram: {
-    botToken: process.env.TELEGRAM_BOT_TOKEN,
-  },
+  telegram: { botToken: process.env.TELEGRAM_BOT_TOKEN },
   pushcut: {
     morningUrl: 'https://api.pushcut.io/SqkzZ_LTIkyZ00984Lh5F/notifications/Morning%20Briefing%20',
     checkinUrl: 'https://api.pushcut.io/SqkzZ_LTIkyZ00984Lh5F/notifications/%20Check%20up%20',

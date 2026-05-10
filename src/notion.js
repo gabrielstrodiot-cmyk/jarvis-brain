@@ -79,4 +79,48 @@ async function saveFacts(facts) {
   } catch (e) { console.error('saveFacts:', e.message) }
 }
 
-module.exports = { search, readPage, appendToPage, createPage, loadFacts, saveFacts }
+async function getActiveTasks() {
+  try {
+    const data = await notionRequest('POST', `/databases/${config.notion.tasksDbId}/query`, {
+      filter: {
+        property: 'Statut',
+        select: { does_not_equal: 'Terminer ✅' }
+      },
+      sorts: [{ property: 'Prioritée', direction: 'ascending' }],
+      page_size: 15
+    })
+    const tasks = (data.results || []).map(page => {
+      const name = page.properties?.Name?.title?.[0]?.plain_text
+                || page.properties?.Nom?.title?.[0]?.plain_text || 'Sans titre'
+      const priority = page.properties?.Prioritée?.select?.name || ''
+      const date = page.properties?.Jour?.date?.start || ''
+      return `${priority ? `[${priority}] ` : ''}${name}${date ? ` (${date})` : ''}`
+    })
+    return tasks.length > 0 ? tasks.join('\n') : 'Aucune tâche active'
+  } catch (e) {
+    console.error('getActiveTasks:', e.message)
+    return ''
+  }
+}
+
+async function getActiveProjects() {
+  try {
+    const data = await notionRequest('POST', `/databases/${config.notion.projectsDbId}/query`, {
+      filter: {
+        property: 'Statut',
+        select: { equals: 'En cours' }
+      },
+      page_size: 10
+    })
+    const projects = (data.results || []).map(page => {
+      return page.properties?.Name?.title?.[0]?.plain_text
+          || page.properties?.Nom?.title?.[0]?.plain_text || 'Sans titre'
+    })
+    return projects.length > 0 ? projects.join('\n') : 'Aucun projet actif'
+  } catch (e) {
+    console.error('getActiveProjects:', e.message)
+    return ''
+  }
+}
+
+module.exports = { search, readPage, appendToPage, createPage, loadFacts, saveFacts, getActiveTasks, getActiveProjects }

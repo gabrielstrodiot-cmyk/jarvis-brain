@@ -64,4 +64,18 @@ async function searchNotes(query) {
   return data.items?.map(i => i.path) || [];
 }
 
-module.exports = { readNote, writeNote, listFolder, searchNotes };
+async function getRandomNote() {
+  try {
+    const files = await listFolder('')
+    if (!files || files.length === 0) return null
+    const randomPath = files[Math.floor(Math.random() * files.length)]
+    const content = await readNote(randomPath)
+    const name = randomPath.split('/').pop().replace('.md', '')
+    return { name, preview: content.slice(0, 400) }
+  } catch (e) {
+    console.error('getRandomNote:', e.message)
+    return null
+  }
+}
+
+module.exports = { readNote, writeNote, getRandomNote, listFolder, searchNotes };
