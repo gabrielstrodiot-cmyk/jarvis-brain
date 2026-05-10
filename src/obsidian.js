@@ -1,4 +1,3 @@
-cat > ~/jarvis-brain/src/obsidian.js << 'EOF'
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 const REPO = 'gabrielstrodiot-cmyk/Obsidian-vlaut';
 const BRANCH = 'main';
@@ -44,4 +43,3 @@ async function searchNotes(query) {
 }
 
 module.exports = { readNote, writeNote, listFolder, searchNotes };
-EOF
