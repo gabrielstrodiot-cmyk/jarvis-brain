@@ -1,17 +1,22 @@
 const notion = require('./notion')
+const db = require('./db')
 
 let store = { facts: [], history: [] }
 
 async function load() {
   store.facts = await notion.loadFacts()
+  store.history = await db.loadHistory()
   return store
 }
 
 function get() { return store }
 
 function addToHistory(role, content) {
-  store.history.push({ role, content, timestamp: new Date().toISOString() })
+  const entry = { role, content, timestamp: new Date().toISOString() }
+  store.history.push(entry)
   if (store.history.length > 20) store.history = store.history.slice(-20)
+  // Fire-and-forget — ne bloque pas la réponse Telegram
+  db.saveMessage(role, content).catch(e => console.error('🔴 DB history save:', e.message))
 }
 
 function getHistoryMessages() {
@@ -22,7 +27,10 @@ function addFact(fact) {
   if (!store.facts.includes(fact)) store.facts.push(fact)
 }
 
-async function persist() { await notion.saveFacts(store.facts) }
+async function persist() {
+  await notion.saveFacts(store.facts)
+  // History déjà persisté en temps réel via addToHistory → db.saveMessage
+}
 
 function formatFactsForPrompt() {
   if (!store.facts || store.facts.length === 0) return ''

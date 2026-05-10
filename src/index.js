@@ -3,6 +3,7 @@ const config = require('./config')
 const memory = require('./memory')
 const notion = require('./notion')
 const { getCalendarEvents } = require('./google')
+const db = require('./db')
 
 const app = express()
 app.use(express.json({ limit: '10mb' }))
@@ -36,8 +37,9 @@ app.delete('/memory/facts', async (req, res) => {
   res.json({ ok: true })
 })
 
-app.delete('/memory/history', (req, res) => {
+app.delete('/memory/history', async (req, res) => {
   memory.get().history = []
+  await db.clearHistory()
   res.json({ ok: true })
 })
 
@@ -56,7 +58,7 @@ app.get('/health', (req, res) => {
   })
 })
 
-async function start() {
+async function start() {await db.init() 
   try {
     await memory.load()
     console.log(`🧠 Mémoire chargée : ${memory.get().facts.length} facts`)
