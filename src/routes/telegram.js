@@ -13,7 +13,6 @@ const { getCalendarEvents, getGmailUnread } = require('../google')
 
 const bot = new TelegramBot(config.telegram.botToken, { polling: true })
 
-// Ton chat ID Telegram — sera détecté automatiquement au premier message
 let GABRIEL_CHAT_ID = process.env.TELEGRAM_CHAT_ID || null
 
 console.log('🤖 Telegram bot démarré — @jarvis_strodiot_bot')
@@ -21,15 +20,15 @@ console.log('🤖 Telegram bot démarré — @jarvis_strodiot_bot')
 // ── NETTOYAGE TEXTE POUR ELEVENLABS ──────────────────────────
 function cleanForVoice(text) {
   return text
-    .replace(/[\u{1F300}-\u{1F9FF}]/gu, '')  // emojis
-    .replace(/[\u{2600}-\u{26FF}]/gu, '')     // symboles divers
-    .replace(/[\u{2700}-\u{27BF}]/gu, '')     // dingbats
-    .replace(/[✅❌📄🔗📝🤖🎙️⚠️]/g, '')
+    .replace(/[\u{1F300}-\u{1F9FF}]/gu, '')
+    .replace(/[\u{2600}-\u{26FF}]/gu, '')
+    .replace(/[\u{2700}-\u{27BF}]/gu, '')
+    .replace(/[✅❌📄🔗📝🤖🎙️⚠️🌅]/g, '')
     .replace(/\*\*/g, '')
     .replace(/#{1,3} /g, '')
     .replace(/\n\n/g, '. ')
     .replace(/\n/g, ', ')
-    .replace(/[^\x00-\x7F\u00C0-\u024F\u1E00-\u1EFF]/g, '') // garde latin étendu
+    .replace(/[^\x00-\x7F\u00C0-\u024F\u1E00-\u1EFF]/g, '')
     .trim()
 }
 
@@ -94,7 +93,6 @@ async function sendVoiceReply(chatId, text) {
 
 // ── TRAITEMENT MESSAGE ────────────────────────────────────────
 async function handleMessage(chatId, text) {
-  // Mémorise le chat ID de Gabriel
   if (!GABRIEL_CHAT_ID) {
     GABRIEL_CHAT_ID = chatId
     console.log(`📱 Chat ID Gabriel enregistré : ${chatId}`)
@@ -119,7 +117,7 @@ async function handleMessage(chatId, text) {
 async function sendMorningBriefing() {
   const chatId = GABRIEL_CHAT_ID || process.env.TELEGRAM_CHAT_ID
   if (!chatId) {
-    console.log('⚠️  Morning briefing : chat ID Gabriel inconnu — envoie un message à Jarvis d\'abord')
+    console.log('⚠️  Morning briefing : chat ID inconnu')
     return
   }
 
@@ -132,18 +130,17 @@ async function sendMorningBriefing() {
     ])
 
     const prompt = `Génère mon morning briefing du jour. Sois concis et direct. Inclus :
-1. Météo à Namur (si disponible)
-2. Mon agenda aujourd'hui et demain
-3. Mails importants non lus
-4. Rappel morning routine
-5. Une intention pour la journée
+1. Mon agenda aujourd'hui et demain
+2. Mails importants non lus
+3. Rappel morning routine
+4. Une intention pour la journée
 
-Format : texte court, pas de markdown excessif, max 200 mots.`
+Format : texte court, pas de markdown, max 150 mots.`
 
     const rawReply = await claudeClient.chat(prompt, calendarEvents, gmailUnread)
     const { text: reply } = await actions.processReply(rawReply)
 
-    await bot.sendMessage(chatId, `🌅 *Morning Briefing*\n\n${reply}`, { parse_mode: 'Markdown' })
+    await bot.sendMessage(chatId, `🌅 Morning Briefing\n\n${reply}`)
     await sendVoiceReply(chatId, reply)
 
     console.log('✅ Morning briefing envoyé')
@@ -152,34 +149,29 @@ Format : texte court, pas de markdown excessif, max 200 mots.`
   }
 }
 
-// ── CRON 06h30 ────────────────────────────────────────────────
-// Timezone Europe/Brussels (UTC+2 en été)
+// ── CRON 06h30 Europe/Brussels ────────────────────────────────
 cron.schedule('30 4 * * *', () => {
   sendMorningBriefing()
 }, { timezone: 'Europe/Brussels' })
 
 console.log('⏰ Morning briefing programmé à 06h30 (Europe/Brussels)')
 
-// ── MESSAGES TEXTE ────────────────────────────────────────────
+// ── MESSAGES TEXTE → réponse texte uniquement ─────────────────
 bot.on('message', async (msg) => {
   const chatId = msg.chat.id
-  if (!msg.text && !msg.voice && !msg.audio) return
-  if (msg.voice || msg.audio) return // géré par l'event voice
+  if (!msg.text || msg.voice || msg.audio) return
 
-  if (msg.text) {
-    try {
-      await bot.sendChatAction(chatId, 'typing')
-      const reply = await handleMessage(chatId, msg.text)
-      await bot.sendMessage(chatId, reply)
-      await sendVoiceReply(chatId, reply)
-    } catch (e) {
-      console.error('Message error:', e.message)
-      await bot.sendMessage(chatId, `Erreur : ${e.message}`)
-    }
+  try {
+    await bot.sendChatAction(chatId, 'typing')
+    const reply = await handleMessage(chatId, msg.text)
+    await bot.sendMessage(chatId, reply)
+  } catch (e) {
+    console.error('Message error:', e.message)
+    await bot.sendMessage(chatId, `Erreur : ${e.message}`)
   }
 })
 
-// ── MESSAGES VOCAUX ───────────────────────────────────────────
+// ── MESSAGES VOCAUX → texte + vocal ──────────────────────────
 bot.on('voice', async (msg) => {
   const chatId = msg.chat.id
   try {
@@ -200,8 +192,6 @@ bot.on('voice', async (msg) => {
     if (!transcript || transcript.trim().length === 0) {
       return bot.sendMessage(chatId, 'Audio inaudible, reessaie.')
     }
-
-    await bot.sendMessage(chatId, `_"${transcript}"_`, { parse_mode: 'Markdown' })
 
     const reply = await handleMessage(chatId, transcript)
     await bot.sendMessage(chatId, reply)
