@@ -72,3 +72,4 @@ async function start() {
 }
 
 start()
+require('./routes/telegram')

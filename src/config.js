@@ -19,6 +19,9 @@ const config = {
     redirectUri: process.env.GOOGLE_REDIRECT_URI || 'http://localhost:3000/auth/callback',
     refreshToken: process.env.GOOGLE_REFRESH_TOKEN,
   },
+  telegram: {
+    botToken: process.env.TELEGRAM_BOT_TOKEN,
+  },
   pushcut: {
     morningUrl: 'https://api.pushcut.io/SqkzZ_LTIkyZ00984Lh5F/notifications/Morning%20Briefing%20',
     checkinUrl: 'https://api.pushcut.io/SqkzZ_LTIkyZ00984Lh5F/notifications/%20Check%20up%20',
