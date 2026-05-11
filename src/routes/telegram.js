@@ -16,6 +16,18 @@ const obsidian = require('../obsidian')
 
 let GABRIEL_CHAT_ID = process.env.TELEGRAM_CHAT_ID || null
 
+// ── WHITELIST ─────────────────────────────────────────────────
+const ALLOWED_USER_ID = parseInt(process.env.TELEGRAM_ALLOWED_USER_ID)
+
+function isAuthorized(msg) {
+  const userId = msg?.from?.id
+  if (userId !== ALLOWED_USER_ID) {
+    console.log(`🚫 Accès non autorisé — user ID: ${userId}`)
+    return false
+  }
+  return true
+}
+
 console.log('🤖 Telegram bot démarré — @jarvis_strodiot_bot')
 
 // ── NETTOYAGE TEXTE POUR ELEVENLABS ──────────────────────────
@@ -110,7 +122,6 @@ async function handleMessage(chatId, text) {
 
   let finalReply = processedReply
 
-  // Deux passes : si données fetchées, re-synthétise avec Claude
   if (fetchedData && Object.keys(fetchedData).length > 0) {
     const dataContext = Object.values(fetchedData).join('\n\n')
     const synthesisPrompt = `Gabriel a demandé : "${text}"\n\nDonnées récupérées :\n\n${dataContext}\n\nRéponds à Gabriel de façon naturelle et concise.`
@@ -158,7 +169,7 @@ Format : texte fluide, pas de markdown, max 200 mots.`
 
     const rawReply = await claudeClient.chat(prompt, calendarEvents, gmailUnread, tasks, projects, obsidianNote)
     const { text: reply } = await actions.processReply(rawReply)
-    
+
     await bot.sendMessage(chatId, `🌅 Morning Briefing\n\n${reply}`)
     await sendVoiceReply(chatId, reply)
 
@@ -175,8 +186,10 @@ cron.schedule('30 4 * * *', () => {
 
 console.log('⏰ Morning briefing programmé à 06h30 (Europe/Brussels)')
 
-// ── MESSAGES TEXTE → réponse texte uniquement ─────────────────
+// ── MESSAGES TEXTE ────────────────────────────────────────────
 bot.on('message', async (msg) => {
+  if (!isAuthorized(msg)) return
+
   const chatId = msg.chat.id
   if (!msg.text || msg.voice || msg.audio) return
 
@@ -190,8 +203,10 @@ bot.on('message', async (msg) => {
   }
 })
 
-// ── MESSAGES VOCAUX → texte + vocal ──────────────────────────
+// ── MESSAGES VOCAUX ───────────────────────────────────────────
 bot.on('voice', async (msg) => {
+  if (!isAuthorized(msg)) return
+
   const chatId = msg.chat.id
   try {
     await bot.sendChatAction(chatId, 'typing')
