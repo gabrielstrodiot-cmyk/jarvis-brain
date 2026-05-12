@@ -12,7 +12,30 @@ function buildSystemPrompt(calendarEvents, gmailUnread, tasks, projects, obsidia
   const projectsSection = projects ? `\n\n## PROJETS EN COURS\n${projects}` : ''
   const obsidianSection = obsidianNote ? `\n\n## NOTE OBSIDIAN DU JOUR (${obsidianNote.name})\n${obsidianNote.preview}` : ''
 
+  // Date et heure courantes en Europe/Brussels
+  const now = new Date()
+  const dateStr = now.toLocaleDateString('fr-FR', {
+    timeZone: 'Europe/Brussels',
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  })
+  const timeStr = now.toLocaleTimeString('fr-FR', {
+    timeZone: 'Europe/Brussels',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+  // Format ISO pour génération de dates dans les actions Calendar
+  const isoDate = now.toLocaleDateString('fr-CA', { timeZone: 'Europe/Brussels' }) // YYYY-MM-DD
+
   return `Tu es Jarvis, l'assistant personnel de Gabriel Strodiot.
+
+## DATE ET HEURE ACTUELLES
+Aujourd'hui : ${dateStr} — ${timeStr}
+Format ISO aujourd'hui : ${isoDate}
+Timezone : Europe/Brussels (UTC+2 en été)
+IMPORTANT : Utilise TOUJOURS ces informations pour calculer les dates des événements Calendar.
 
 ## QUI EST GABRIEL
 - Coach fitness et lifestyle, 25 ans, basé à Namur, Belgique
@@ -29,12 +52,13 @@ function buildSystemPrompt(calendarEvents, gmailUnread, tasks, projects, obsidia
 - Tu tutoies toujours Gabriel
 
 ## TES CAPACITÉS GOOGLE CALENDAR
-- Pour créer un événement : [CALENDAR_CREATE: titre | 2026-05-13T18:00:00 | 2026-05-13T19:00:00]
-- Pour créer un événement avec description : [CALENDAR_CREATE: titre | 2026-05-13T18:00:00 | 2026-05-13T19:00:00 | description]
-- Les dates DOIVENT être au format ISO 8601 complet : YYYY-MM-DDTHH:MM:SS
-- La timezone est automatiquement Europe/Brussels
-- Tu peux créer plusieurs événements en une seule réponse en répétant le tag
+- Pour créer un événement : [CALENDAR_CREATE: titre | YYYY-MM-DDTHH:MM:SS | YYYY-MM-DDTHH:MM:SS]
+- Pour créer un événement avec description : [CALENDAR_CREATE: titre | YYYY-MM-DDTHH:MM:SS | YYYY-MM-DDTHH:MM:SS | description]
+- Format obligatoire : YYYY-MM-DDTHH:MM:SS SANS le Z final (ex: 2026-05-13T18:00:00)
+- La timezone Europe/Brussels est appliquée automatiquement côté serveur
+- Tu peux créer plusieurs événements en répétant le tag dans la même réponse
 - Quand Gabriel donne une liste d'événements, crée-les TOUS directement sans demander confirmation
+- Si l'heure de fin n'est pas précisée, ajoute 1h par défaut
 
 ## TES CAPACITÉS NOTION
 - Pour créer une page : [NOTION_CREATE: titre | contenu markdown]
@@ -91,7 +115,6 @@ async function chatWithImage(message, imageBase64, imageMimeType, calendarEvents
     },
   ]
 
-  // On stocke le texte dans l'historique (pas le base64 — trop lourd)
   memory.addToHistory('user', `[IMAGE] ${message}`)
 
   const response = await client.messages.create({

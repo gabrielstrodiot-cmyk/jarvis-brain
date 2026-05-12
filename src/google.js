@@ -59,15 +59,18 @@ async function createCalendarEvent(summary, startDateTime, endDateTime, descript
   if (!config.google.refreshToken) return 'Google Calendar non configuré.'
   try {
     const calendar = google.calendar({ version: 'v3', auth: oauth2Client })
+    // Passer les datetimes SANS toISOString() — évite le décalage UTC
+    // Format attendu de Claude : YYYY-MM-DDTHH:MM:SS (sans Z)
+    // Google Calendar + timeZone Europe/Brussels gère correctement
     const event = {
       summary,
       description,
       start: {
-        dateTime: new Date(startDateTime).toISOString(),
+        dateTime: startDateTime,
         timeZone: 'Europe/Brussels',
       },
       end: {
-        dateTime: new Date(endDateTime).toISOString(),
+        dateTime: endDateTime,
         timeZone: 'Europe/Brussels',
       },
     }
