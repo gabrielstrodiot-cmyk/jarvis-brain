@@ -75,3 +75,14 @@ async function start() {await db.init()
 
 start()
 require('./routes/telegram')
+
+app.get('/me', async (req, res) => {
+  try {
+    const { google } = require('googleapis')
+    const oauth2Client = new google.auth.OAuth2(config.google.clientId, config.google.clientSecret, config.google.redirectUri)
+    oauth2Client.setCredentials({ refresh_token: config.google.refreshToken })
+    const oauth2 = google.oauth2({ version: 'v2', auth: oauth2Client })
+    const { data } = await oauth2.userinfo.get()
+    res.json({ email: data.email, name: data.name })
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
