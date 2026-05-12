@@ -7,15 +7,13 @@ const client = new Anthropic({ apiKey: config.anthropic.apiKey })
 // Calcul date Brussels sans dépendance locale (compatible Railway Linux)
 function getBrusselsDateContext() {
   const now = new Date()
-
-  // Convertir en heure Brussels via en-US (toujours disponible sur Node.js)
   const brusselsString = now.toLocaleString('en-US', { timeZone: 'Europe/Brussels' })
   const brussels = new Date(brusselsString)
 
   const year = brussels.getFullYear()
-  const month = brussels.getMonth() // 0-indexed
+  const month = brussels.getMonth()
   const date = brussels.getDate()
-  const dayOfWeek = brussels.getDay() // 0=dim, 1=lun...
+  const dayOfWeek = brussels.getDay()
   const hours = String(brussels.getHours()).padStart(2, '0')
   const minutes = String(brussels.getMinutes()).padStart(2, '0')
 
@@ -29,16 +27,16 @@ function getBrusselsDateContext() {
   const dateStr = `${daysFR[dayOfWeek]} ${date} ${monthsFR[month]} ${year}`
   const timeStr = `${hours}:${minutes}`
 
-  // Calculer les 7 prochains jours pour éviter toute ambiguïté
+  // 14 prochains jours pour couvrir la semaine en cours + suivante
   const weekDays = []
-  for (let i = 0; i <= 7; i++) {
+  for (let i = 0; i <= 14; i++) {
     const d = new Date(brussels)
     d.setDate(date + i)
     const dYear = d.getFullYear()
     const dMonth = String(d.getMonth() + 1).padStart(2, '0')
     const dDate = String(d.getDate()).padStart(2, '0')
     const dDay = daysFR[d.getDay()]
-    weekDays.push(`${dDay} = ${dYear}-${dMonth}-${dDate}`)
+    weekDays.push(`${dDay} ${dDate} = ${dYear}-${dMonth}-${dDate}`)
   }
 
   return { dateStr, timeStr, isoToday, weekDays }
@@ -60,11 +58,18 @@ function buildSystemPrompt(calendarEvents, gmailUnread, tasks, projects, obsidia
 Aujourd'hui : ${dateStr} — ${timeStr}
 ISO aujourd'hui : ${isoToday}
 
-## CORRESPONDANCE JOURS → DATES ISO (utilise UNIQUEMENT ces valeurs)
+## TABLE DE CORRESPONDANCE JOURS → DATES ISO
+(Source de vérité absolue — utilise UNIQUEMENT ces valeurs pour créer des événements)
 ${weekDays.join('\n')}
 
-RÈGLE ABSOLUE CALENDAR : Quand Gabriel mentionne un jour ("mardi", "mercredi"...), utilise
-TOUJOURS la date ISO correspondante dans le tableau ci-dessus. Ne jamais calculer toi-même.
+## RÈGLES CALENDAR — LIS ATTENTIVEMENT
+1. Quand Gabriel mentionne un jour ("mardi", "jeudi"...), utilise la date ISO de la table ci-dessus. Ne jamais calculer toi-même.
+2. Quand Gabriel envoie une IMAGE contenant un programme ou des rendez-vous :
+   - Lis les noms de jours et les heures dans l'image
+   - Mappe chaque jour sur la date ISO de la table ci-dessus
+   - Crée tous les événements automatiquement
+   - IGNORE toute date ISO ou année que tu vois dans l'image — utilise TOUJOURS la table
+3. Ne jamais utiliser une date que tu vois dans un screenshot de calendrier ou d'agenda — ces visuels peuvent être erronés. La table est la seule référence.
 
 ## QUI EST GABRIEL
 - Coach fitness et lifestyle, 25 ans, basé à Namur, Belgique
@@ -86,7 +91,7 @@ TOUJOURS la date ISO correspondante dans le tableau ci-dessus. Ne jamais calcule
 - Format obligatoire : YYYY-MM-DDTHH:MM:SS SANS le Z final (ex: 2026-05-13T18:00:00)
 - La timezone Europe/Brussels est appliquée automatiquement côté serveur
 - Tu peux créer plusieurs événements en répétant le tag dans la même réponse
-- Quand Gabriel donne une liste d'événements, crée-les TOUS directement sans demander confirmation
+- Quand Gabriel donne une liste d'événements (texte ou image), crée-les TOUS directement sans demander confirmation
 - Si l'heure de fin n'est pas précisée, ajoute 1h par défaut
 
 ## TES CAPACITÉS NOTION
@@ -126,7 +131,7 @@ async function chat(message, calendarEvents = null, gmailUnread = null, tasks = 
   return response.content[0].text
 }
 
-async function chatWithImage(message, imageBase64, imageMimeType, calendarEvents = null, gmailUnread = null) {
+async function chatWithImage(message, imageBase64, imageMimeType, calendarEvents = null, gmailUnread = null, tasks = null, projects = null) {
   const historyMessages = memory.getHistoryMessages()
 
   const userContent = [
@@ -149,7 +154,8 @@ async function chatWithImage(message, imageBase64, imageMimeType, calendarEvents
   const response = await client.messages.create({
     model: 'claude-sonnet-4-5',
     max_tokens: 2048,
-    system: buildSystemPrompt(calendarEvents, gmailUnread, null, null, null),
+    // Image reçoit le même system prompt complet — avec la table de dates
+    system: buildSystemPrompt(calendarEvents, gmailUnread, tasks, projects, null),
     messages: [...historyMessages, { role: 'user', content: userContent }],
   })
   return response.content[0].text
