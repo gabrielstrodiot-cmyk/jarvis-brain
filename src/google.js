@@ -15,7 +15,7 @@ function getAuthUrl() {
   return oauth2Client.generateAuthUrl({
     access_type: 'offline',
     scope: [
-      'https://www.googleapis.com/auth/calendar.readonly',
+      'https://www.googleapis.com/auth/calendar',
       'https://www.googleapis.com/auth/gmail.readonly',
     ],
     prompt: 'consent',
@@ -55,6 +55,32 @@ async function getCalendarEvents() {
   }
 }
 
+async function createCalendarEvent(summary, startDateTime, endDateTime, description = '') {
+  if (!config.google.refreshToken) return 'Google Calendar non configuré.'
+  try {
+    const calendar = google.calendar({ version: 'v3', auth: oauth2Client })
+    const event = {
+      summary,
+      description,
+      start: {
+        dateTime: new Date(startDateTime).toISOString(),
+        timeZone: 'Europe/Brussels',
+      },
+      end: {
+        dateTime: new Date(endDateTime).toISOString(),
+        timeZone: 'Europe/Brussels',
+      },
+    }
+    const response = await calendar.events.insert({
+      calendarId: 'primary',
+      resource: event,
+    })
+    return `Événement créé : ${summary} — ${response.data.htmlLink}`
+  } catch (e) {
+    return 'Erreur création événement : ' + e.message
+  }
+}
+
 async function getGmailUnread() {
   if (!config.google.refreshToken) return 'Gmail non configuré.'
   try {
@@ -75,4 +101,4 @@ async function getGmailUnread() {
   }
 }
 
-module.exports = { getAuthUrl, handleCallback, getCalendarEvents, getGmailUnread }
+module.exports = { getAuthUrl, handleCallback, getCalendarEvents, createCalendarEvent, getGmailUnread }

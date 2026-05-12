@@ -1,6 +1,7 @@
 const notion = require('./notion')
 const memory = require('./memory')
 const obsidian = require('./obsidian')
+const google = require('./google')
 
 async function processReply(reply) {
   let text = reply
@@ -11,6 +12,25 @@ async function processReply(reply) {
   for (const match of rememberMatches) {
     memory.addFact(match[1].trim())
     text = text.replace(match[0], '')
+  }
+
+  // CALENDAR — créer un événement
+  // Format : [CALENDAR_CREATE: titre | 2026-05-13T18:00 | 2026-05-13T19:00]
+  // Format avec description : [CALENDAR_CREATE: titre | 2026-05-13T18:00 | 2026-05-13T19:00 | description]
+  const calendarCreateMatches = [...text.matchAll(/\[CALENDAR_CREATE:\s*(.+?)\s*\|\s*(.+?)\s*\|\s*(.+?)(?:\s*\|\s*([\s\S]+?))?\]/gi)]
+  for (const match of calendarCreateMatches) {
+    const summary = match[1].trim()
+    const startDateTime = match[2].trim()
+    const endDateTime = match[3].trim()
+    const description = match[4] ? match[4].trim() : ''
+    try {
+      const result = await google.createCalendarEvent(summary, startDateTime, endDateTime, description)
+      text = text.replace(match[0], '').trim()
+      text += `\n${result}`
+    } catch (e) {
+      text = text.replace(match[0], '').trim()
+      text += `\nErreur Calendar : ${e.message}`
+    }
   }
 
   // OBSIDIAN — stocke dans fetchedData au lieu de remplacer inline
