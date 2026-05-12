@@ -12,12 +12,19 @@ async function init() {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS conversations (
         id        SERIAL PRIMARY KEY,
-        role      VARCHAR(20)  NOT NULL,
-        content   TEXT         NOT NULL,
-        timestamp TIMESTAMPTZ  DEFAULT NOW()
+        role      VARCHAR(20) NOT NULL,
+        content   TEXT        NOT NULL,
+        timestamp TIMESTAMPTZ DEFAULT NOW()
       )
     `)
-    console.log('🗄️ PostgreSQL conversations table ready')
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS facts (
+        id         SERIAL PRIMARY KEY,
+        content    TEXT NOT NULL UNIQUE,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `)
+    console.log('🗄️  PostgreSQL tables ready (conversations + facts)')
   } catch (e) {
     console.error('🔴 PostgreSQL init error:', e.message)
     throw e
@@ -46,4 +53,31 @@ async function clearHistory() {
   await pool.query('DELETE FROM conversations')
 }
 
-module.exports = { init, saveMessage, loadHistory, clearHistory }
+// ── FACTS ─────────────────────────────────────────────────────
+
+async function loadFacts() {
+  try {
+    const result = await pool.query('SELECT content FROM facts ORDER BY created_at ASC')
+    return result.rows.map(r => r.content)
+  } catch (e) {
+    console.error('🔴 loadFacts error:', e.message)
+    return []
+  }
+}
+
+async function saveFacts(facts) {
+  try {
+    // Remplace tout — delete + insert propre
+    await pool.query('DELETE FROM facts')
+    for (const fact of facts) {
+      await pool.query(
+        'INSERT INTO facts (content) VALUES ($1) ON CONFLICT (content) DO NOTHING',
+        [fact]
+      )
+    }
+  } catch (e) {
+    console.error('🔴 saveFacts error:', e.message)
+  }
+}
+
+module.exports = { init, saveMessage, loadHistory, clearHistory, loadFacts, saveFacts }

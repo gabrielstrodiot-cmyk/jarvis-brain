@@ -1,10 +1,10 @@
-const notion = require('./notion')
 const db = require('./db')
 
 let store = { facts: [], history: [] }
 
 async function load() {
-  store.facts = await notion.loadFacts()
+  // Facts et historique depuis PostgreSQL
+  store.facts = await db.loadFacts()
   store.history = await db.loadHistory()
   return store
 }
@@ -24,17 +24,21 @@ function getHistoryMessages() {
 }
 
 function addFact(fact) {
-  if (!store.facts.includes(fact)) store.facts.push(fact)
+  const trimmed = fact.trim()
+  if (trimmed && !store.facts.includes(trimmed)) {
+    store.facts.push(trimmed)
+    // Persist immédiatement — fire-and-forget
+    db.saveFacts(store.facts).catch(e => console.error('🔴 DB facts save:', e.message))
+  }
 }
 
 async function persist() {
-  await notion.saveFacts(store.facts)
-  // History déjà persisté en temps réel via addToHistory → db.saveMessage
+  await db.saveFacts(store.facts)
 }
 
 function formatFactsForPrompt() {
   if (!store.facts || store.facts.length === 0) return ''
-  return `\n\n## MÉMOIRE LONG TERME\n${store.facts.map(f => `- ${f}`).join('\n')}`
+  return `\n\n## CE QUE JARVIS SAIT SUR GABRIEL\n${store.facts.map(f => `- ${f}`).join('\n')}`
 }
 
 module.exports = { load, get, addToHistory, getHistoryMessages, addFact, persist, formatFactsForPrompt }
