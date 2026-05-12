@@ -104,7 +104,7 @@ async function sendVoiceReply(chatId, text) {
   }
 }
 
-// ── TRAITEMENT MESSAGE ────────────────────────────────────────
+// ── TRAITEMENT MESSAGE TEXTE ──────────────────────────────────
 async function handleMessage(chatId, text) {
   if (!GABRIEL_CHAT_ID) {
     GABRIEL_CHAT_ID = chatId
@@ -125,6 +125,40 @@ async function handleMessage(chatId, text) {
   if (fetchedData && Object.keys(fetchedData).length > 0) {
     const dataContext = Object.values(fetchedData).join('\n\n')
     const synthesisPrompt = `Gabriel a demandé : "${text}"\n\nDonnées récupérées :\n\n${dataContext}\n\nRéponds à Gabriel de façon naturelle et concise.`
+    finalReply = await claudeClient.generate(
+      claudeClient.buildSystemPrompt(calendarEvents, gmailUnread),
+      synthesisPrompt,
+      1000
+    )
+  }
+
+  memory.addToHistory('assistant', finalReply)
+  await memory.persist()
+
+  return finalReply
+}
+
+// ── TRAITEMENT IMAGE ──────────────────────────────────────────
+async function handleImageMessage(chatId, caption, imageBase64, imageMimeType) {
+  if (!GABRIEL_CHAT_ID) {
+    GABRIEL_CHAT_ID = chatId
+    console.log(`📱 Chat ID Gabriel enregistré : ${chatId}`)
+  }
+
+  await memory.load()
+  const [calendarEvents, gmailUnread] = await Promise.all([
+    getCalendarEvents(),
+    getGmailUnread(),
+  ])
+
+  const rawReply = await claudeClient.chatWithImage(caption, imageBase64, imageMimeType, calendarEvents, gmailUnread)
+  const { text: processedReply, fetchedData } = await actions.processReply(rawReply)
+
+  let finalReply = processedReply
+
+  if (fetchedData && Object.keys(fetchedData).length > 0) {
+    const dataContext = Object.values(fetchedData).join('\n\n')
+    const synthesisPrompt = `Gabriel a envoyé une image avec le message : "${caption}"\n\nDonnées récupérées :\n\n${dataContext}\n\nRéponds à Gabriel de façon naturelle et concise.`
     finalReply = await claudeClient.generate(
       claudeClient.buildSystemPrompt(calendarEvents, gmailUnread),
       synthesisPrompt,
@@ -233,6 +267,44 @@ bot.on('voice', async (msg) => {
 
   } catch (e) {
     console.error('Voice error:', e.message)
+    await bot.sendMessage(chatId, `Erreur : ${e.message}`)
+  }
+})
+
+// ── PHOTOS ────────────────────────────────────────────────────
+bot.on('photo', async (msg) => {
+  if (!isAuthorized(msg)) return
+
+  const chatId = msg.chat.id
+  try {
+    await bot.sendChatAction(chatId, 'typing')
+
+    // Dernière entrée du tableau = meilleure résolution
+    const photo = msg.photo[msg.photo.length - 1]
+    const caption = msg.caption || 'Analyse cette image et dis-moi ce que tu vois.'
+
+    // Télécharger depuis les serveurs Telegram
+    const fileInfo = await bot.getFile(photo.file_id)
+    const fileUrl = `https://api.telegram.org/file/bot${config.telegram.botToken}/${fileInfo.file_path}`
+
+    const imgRes = await fetch(fileUrl)
+    const buffer = await imgRes.buffer()
+    const base64 = buffer.toString('base64')
+
+    // Telegram compresse toujours les photos en JPEG
+    const ext = path.extname(fileInfo.file_path).toLowerCase()
+    const mimeType = ext === '.png' ? 'image/png'
+                   : ext === '.webp' ? 'image/webp'
+                   : 'image/jpeg'
+
+    console.log(`🖼️  Photo reçue — ${photo.width}x${photo.height} — caption: "${caption}"`)
+
+    const reply = await handleImageMessage(chatId, caption, base64, mimeType)
+    await bot.sendMessage(chatId, reply)
+    await sendVoiceReply(chatId, reply)
+
+  } catch (e) {
+    console.error('Photo error:', e.message)
     await bot.sendMessage(chatId, `Erreur : ${e.message}`)
   }
 })

@@ -64,6 +64,36 @@ async function chat(message, calendarEvents = null, gmailUnread = null, tasks = 
   return response.content[0].text
 }
 
+async function chatWithImage(message, imageBase64, imageMimeType, calendarEvents = null, gmailUnread = null) {
+  const historyMessages = memory.getHistoryMessages()
+
+  const userContent = [
+    {
+      type: 'image',
+      source: {
+        type: 'base64',
+        media_type: imageMimeType,
+        data: imageBase64,
+      },
+    },
+    {
+      type: 'text',
+      text: message,
+    },
+  ]
+
+  // On stocke le texte dans l'historique (pas le base64 — trop lourd)
+  memory.addToHistory('user', `[IMAGE] ${message}`)
+
+  const response = await client.messages.create({
+    model: 'claude-sonnet-4-5',
+    max_tokens: 2048,
+    system: buildSystemPrompt(calendarEvents, gmailUnread, null, null, null),
+    messages: [...historyMessages, { role: 'user', content: userContent }],
+  })
+  return response.content[0].text
+}
+
 async function generate(systemPrompt, userMessage, maxTokens = 500) {
   const response = await client.messages.create({
     model: 'claude-sonnet-4-5',
@@ -74,4 +104,4 @@ async function generate(systemPrompt, userMessage, maxTokens = 500) {
   return response.content[0].text.trim()
 }
 
-module.exports = { chat, generate, buildSystemPrompt }
+module.exports = { chat, chatWithImage, generate, buildSystemPrompt }
