@@ -205,7 +205,6 @@ Format : texte fluide, pas de markdown, max 200 mots.`
     const { text: reply } = await actions.processReply(rawReply)
 
     await bot.sendMessage(chatId, `🌅 Morning Briefing\n\n${reply}`)
-    await sendVoiceReply(chatId, reply)
 
     console.log('✅ Morning briefing envoyé')
   } catch (e) {
@@ -263,7 +262,6 @@ bot.on('voice', async (msg) => {
 
     const reply = await handleMessage(chatId, transcript)
     await bot.sendMessage(chatId, reply)
-    await sendVoiceReply(chatId, reply)
 
   } catch (e) {
     console.error('Voice error:', e.message)
@@ -301,7 +299,6 @@ bot.on('photo', async (msg) => {
 
     const reply = await handleImageMessage(chatId, caption, base64, mimeType)
     await bot.sendMessage(chatId, reply)
-    await sendVoiceReply(chatId, reply)
 
   } catch (e) {
     console.error('Photo error:', e.message)
