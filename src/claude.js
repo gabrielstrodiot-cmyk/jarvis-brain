@@ -4,6 +4,46 @@ const memory = require('./memory')
 
 const client = new Anthropic({ apiKey: config.anthropic.apiKey })
 
+// Calcul date Brussels sans dépendance locale (compatible Railway Linux)
+function getBrusselsDateContext() {
+  const now = new Date()
+
+  // Convertir en heure Brussels via en-US (toujours disponible sur Node.js)
+  const brusselsString = now.toLocaleString('en-US', { timeZone: 'Europe/Brussels' })
+  const brussels = new Date(brusselsString)
+
+  const year = brussels.getFullYear()
+  const month = brussels.getMonth() // 0-indexed
+  const date = brussels.getDate()
+  const dayOfWeek = brussels.getDay() // 0=dim, 1=lun...
+  const hours = String(brussels.getHours()).padStart(2, '0')
+  const minutes = String(brussels.getMinutes()).padStart(2, '0')
+
+  const daysFR = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi']
+  const monthsFR = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin',
+                    'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre']
+
+  const monthPad = String(month + 1).padStart(2, '0')
+  const datePad = String(date).padStart(2, '0')
+  const isoToday = `${year}-${monthPad}-${datePad}`
+  const dateStr = `${daysFR[dayOfWeek]} ${date} ${monthsFR[month]} ${year}`
+  const timeStr = `${hours}:${minutes}`
+
+  // Calculer les 7 prochains jours pour éviter toute ambiguïté
+  const weekDays = []
+  for (let i = 0; i <= 7; i++) {
+    const d = new Date(brussels)
+    d.setDate(date + i)
+    const dYear = d.getFullYear()
+    const dMonth = String(d.getMonth() + 1).padStart(2, '0')
+    const dDate = String(d.getDate()).padStart(2, '0')
+    const dDay = daysFR[d.getDay()]
+    weekDays.push(`${dDay} = ${dYear}-${dMonth}-${dDate}`)
+  }
+
+  return { dateStr, timeStr, isoToday, weekDays }
+}
+
 function buildSystemPrompt(calendarEvents, gmailUnread, tasks, projects, obsidianNote) {
   const facts = memory.formatFactsForPrompt()
   const calendar = calendarEvents ? `\n\n## AGENDA DU JOUR\n${calendarEvents}` : ''
@@ -12,30 +52,19 @@ function buildSystemPrompt(calendarEvents, gmailUnread, tasks, projects, obsidia
   const projectsSection = projects ? `\n\n## PROJETS EN COURS\n${projects}` : ''
   const obsidianSection = obsidianNote ? `\n\n## NOTE OBSIDIAN DU JOUR (${obsidianNote.name})\n${obsidianNote.preview}` : ''
 
-  // Date et heure courantes en Europe/Brussels
-  const now = new Date()
-  const dateStr = now.toLocaleDateString('fr-FR', {
-    timeZone: 'Europe/Brussels',
-    weekday: 'long',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  })
-  const timeStr = now.toLocaleTimeString('fr-FR', {
-    timeZone: 'Europe/Brussels',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-  // Format ISO pour génération de dates dans les actions Calendar
-  const isoDate = now.toLocaleDateString('fr-CA', { timeZone: 'Europe/Brussels' }) // YYYY-MM-DD
+  const { dateStr, timeStr, isoToday, weekDays } = getBrusselsDateContext()
 
   return `Tu es Jarvis, l'assistant personnel de Gabriel Strodiot.
 
-## DATE ET HEURE ACTUELLES
+## DATE ET HEURE ACTUELLES (Europe/Brussels)
 Aujourd'hui : ${dateStr} — ${timeStr}
-Format ISO aujourd'hui : ${isoDate}
-Timezone : Europe/Brussels (UTC+2 en été)
-IMPORTANT : Utilise TOUJOURS ces informations pour calculer les dates des événements Calendar.
+ISO aujourd'hui : ${isoToday}
+
+## CORRESPONDANCE JOURS → DATES ISO (utilise UNIQUEMENT ces valeurs)
+${weekDays.join('\n')}
+
+RÈGLE ABSOLUE CALENDAR : Quand Gabriel mentionne un jour ("mardi", "mercredi"...), utilise
+TOUJOURS la date ISO correspondante dans le tableau ci-dessus. Ne jamais calculer toi-même.
 
 ## QUI EST GABRIEL
 - Coach fitness et lifestyle, 25 ans, basé à Namur, Belgique
