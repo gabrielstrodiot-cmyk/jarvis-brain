@@ -24,6 +24,7 @@ function getBrusselsDateContext() {
   const monthPad = String(month + 1).padStart(2, '0')
   const datePad = String(date).padStart(2, '0')
   const isoToday = `${year}-${monthPad}-${datePad}`
+  const isoNow = `${year}-${monthPad}-${datePad}T${hours}:${minutes}:00`
   const dateStr = `${daysFR[dayOfWeek]} ${date} ${monthsFR[month]} ${year}`
   const timeStr = `${hours}:${minutes}`
 
@@ -39,7 +40,7 @@ function getBrusselsDateContext() {
     weekDays.push(`${dDay} ${dDate} = ${dYear}-${dMonth}-${dDate}`)
   }
 
-  return { dateStr, timeStr, isoToday, weekDays }
+  return { dateStr, timeStr, isoToday, isoNow, weekDays }
 }
 
 function buildSystemPrompt(calendarEvents, gmailUnread, tasks, projects, obsidianNote) {
@@ -50,26 +51,26 @@ function buildSystemPrompt(calendarEvents, gmailUnread, tasks, projects, obsidia
   const projectsSection = projects ? `\n\n## PROJETS EN COURS\n${projects}` : ''
   const obsidianSection = obsidianNote ? `\n\n## NOTE OBSIDIAN DU JOUR (${obsidianNote.name})\n${obsidianNote.preview}` : ''
 
-  const { dateStr, timeStr, isoToday, weekDays } = getBrusselsDateContext()
+  const { dateStr, timeStr, isoToday, isoNow, weekDays } = getBrusselsDateContext()
 
   return `Tu es Jarvis, l'assistant personnel de Gabriel Strodiot.
 
 ## DATE ET HEURE ACTUELLES (Europe/Brussels)
 Aujourd'hui : ${dateStr} — ${timeStr}
-ISO aujourd'hui : ${isoToday}
+ISO maintenant : ${isoNow}
 
 ## TABLE DE CORRESPONDANCE JOURS → DATES ISO
-(Source de vérité absolue — utilise UNIQUEMENT ces valeurs pour créer des événements)
+(Référence absolue — utilise UNIQUEMENT ces valeurs pour créer des événements)
 ${weekDays.join('\n')}
 
-## RÈGLES CALENDAR — LIS ATTENTIVEMENT
-1. Quand Gabriel mentionne un jour ("mardi", "jeudi"...), utilise la date ISO de la table ci-dessus. Ne jamais calculer toi-même.
-2. Quand Gabriel envoie une IMAGE contenant un programme ou des rendez-vous :
-   - Lis les noms de jours et les heures dans l'image
-   - Mappe chaque jour sur la date ISO de la table ci-dessus
-   - Crée tous les événements automatiquement
-   - IGNORE toute date ISO ou année que tu vois dans l'image — utilise TOUJOURS la table
-3. Ne jamais utiliser une date que tu vois dans un screenshot de calendrier ou d'agenda — ces visuels peuvent être erronés. La table est la seule référence.
+## RÈGLES CALENDAR — CRITIQUES
+1. Pour mapper un jour sur une date : utilise EXCLUSIVEMENT la table ci-dessus. Ne jamais calculer.
+
+2. Événements passés : si YYYY-MM-DDTHH:MM:SS < ${isoNow}, NE PAS créer l'événement. L'ignorer silencieusement. Ne pas le reporter au lendemain. Ne pas mentionner qu'il a été ignoré sauf si Gabriel le demande.
+
+3. Images avec programme : lis les noms de jours et heures dans l'image, mappe sur la table, crée uniquement les événements futurs. Ignore toute date ISO visible dans l'image — seule la table compte.
+
+4. Doublons : le serveur détecte automatiquement les doublons par titre+jour. Si un événement existe déjà, il sera ignoré côté serveur. Ne pas s'inquiéter des doublons.
 
 ## QUI EST GABRIEL
 - Coach fitness et lifestyle, 25 ans, basé à Namur, Belgique
@@ -87,12 +88,12 @@ ${weekDays.join('\n')}
 
 ## TES CAPACITÉS GOOGLE CALENDAR
 - Pour créer un événement : [CALENDAR_CREATE: titre | YYYY-MM-DDTHH:MM:SS | YYYY-MM-DDTHH:MM:SS]
-- Pour créer un événement avec description : [CALENDAR_CREATE: titre | YYYY-MM-DDTHH:MM:SS | YYYY-MM-DDTHH:MM:SS | description]
+- Pour créer avec description : [CALENDAR_CREATE: titre | YYYY-MM-DDTHH:MM:SS | YYYY-MM-DDTHH:MM:SS | description]
 - Format obligatoire : YYYY-MM-DDTHH:MM:SS SANS le Z final (ex: 2026-05-13T18:00:00)
-- La timezone Europe/Brussels est appliquée automatiquement côté serveur
-- Tu peux créer plusieurs événements en répétant le tag dans la même réponse
-- Quand Gabriel donne une liste d'événements (texte ou image), crée-les TOUS directement sans demander confirmation
-- Si l'heure de fin n'est pas précisée, ajoute 1h par défaut
+- La timezone Europe/Brussels est appliquée automatiquement
+- Plusieurs événements : répète le tag autant de fois que nécessaire
+- Si l'heure de fin n'est pas précisée : ajoute 1h par défaut
+- Agis directement sans demander confirmation
 
 ## TES CAPACITÉS NOTION
 - Pour créer une page : [NOTION_CREATE: titre | contenu markdown]
@@ -154,7 +155,6 @@ async function chatWithImage(message, imageBase64, imageMimeType, calendarEvents
   const response = await client.messages.create({
     model: 'claude-sonnet-4-5',
     max_tokens: 2048,
-    // Image reçoit le même system prompt complet — avec la table de dates
     system: buildSystemPrompt(calendarEvents, gmailUnread, tasks, projects, null),
     messages: [...historyMessages, { role: 'user', content: userContent }],
   })

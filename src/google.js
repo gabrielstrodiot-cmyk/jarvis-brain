@@ -59,9 +59,29 @@ async function createCalendarEvent(summary, startDateTime, endDateTime, descript
   if (!config.google.refreshToken) return 'Google Calendar non configuré.'
   try {
     const calendar = google.calendar({ version: 'v3', auth: oauth2Client })
-    // Passer les datetimes SANS toISOString() — évite le décalage UTC
-    // Format attendu de Claude : YYYY-MM-DDTHH:MM:SS (sans Z)
-    // Google Calendar + timeZone Europe/Brussels gère correctement
+
+    // Détection de doublon : chercher un event avec le même titre sur le même jour
+    const startDate = new Date(startDateTime)
+    const dayStart = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate(), 0, 0, 0)
+    const dayEnd = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate(), 23, 59, 59)
+
+    const existing = await calendar.events.list({
+      calendarId: 'primary',
+      timeMin: dayStart.toISOString(),
+      timeMax: dayEnd.toISOString(),
+      singleEvents: true,
+    })
+
+    const duplicate = (existing.data.items || []).find(e =>
+      e.summary && e.summary.toLowerCase().trim() === summary.toLowerCase().trim()
+    )
+
+    if (duplicate) {
+      return `Événement déjà existant (ignoré) : ${summary}`
+    }
+
+    // Pas de doublon — créer l'event
+    // Passer les datetimes SANS toISOString() pour éviter le décalage UTC
     const event = {
       summary,
       description,
@@ -74,6 +94,7 @@ async function createCalendarEvent(summary, startDateTime, endDateTime, descript
         timeZone: 'Europe/Brussels',
       },
     }
+
     const response = await calendar.events.insert({
       calendarId: 'primary',
       resource: event,
