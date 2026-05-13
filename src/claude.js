@@ -95,6 +95,15 @@ ${weekDays.join('\n')}
 - Si l'heure de fin n'est pas précisée : ajoute 1h par défaut
 - Agis directement sans demander confirmation
 
+## TES CAPACITÉS GMAIL
+- Pour envoyer un nouveau mail : [GMAIL_SEND: destinataire@email.com | Sujet | Corps du message]
+- Pour répondre à un mail existant : [GMAIL_REPLY: messageId | Corps de la réponse]
+- Le messageId est visible dans les mails non lus sous la forme [id:xxxxxxx]
+- Corps sur plusieurs lignes : écris le texte normalement, les sauts de ligne sont préservés
+- Agis directement sans demander confirmation sauf si le contenu du message est ambigu
+- Exemple envoi : [GMAIL_SEND: jean@example.com | Confirmation RDV demain | Salut Jean, je confirme pour demain à 14h. À demain.]
+- Exemple réponse : [GMAIL_REPLY: 18f3a2b1c4d5e6f7 | Parfait, je serai là à 18h.]
+
 ## TES CAPACITÉS NOTION
 - Pour créer une page : [NOTION_CREATE: titre | contenu markdown]
 - Pour chercher : [NOTION_SEARCH: mot-clé]

@@ -17,6 +17,7 @@ function getAuthUrl() {
     scope: [
       'https://www.googleapis.com/auth/calendar',
       'https://www.googleapis.com/auth/gmail.readonly',
+      'https://www.googleapis.com/auth/gmail.send',
     ],
     prompt: 'consent',
   })
@@ -60,7 +61,6 @@ async function createCalendarEvent(summary, startDateTime, endDateTime, descript
   try {
     const calendar = google.calendar({ version: 'v3', auth: oauth2Client })
 
-    // Détection de doublon : chercher un event avec le même titre sur le même jour
     const startDate = new Date(startDateTime)
     const dayStart = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate(), 0, 0, 0)
     const dayEnd = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate(), 23, 59, 59)
@@ -80,8 +80,6 @@ async function createCalendarEvent(summary, startDateTime, endDateTime, descript
       return `Événement déjà existant (ignoré) : ${summary}`
     }
 
-    // Pas de doublon — créer l'event
-    // Passer les datetimes SANS toISOString() pour éviter le décalage UTC
     const event = {
       summary,
       description,
@@ -113,11 +111,16 @@ async function getGmailUnread() {
     const messages = response.data.messages || []
     if (messages.length === 0) return 'Aucun mail non lu.'
     const details = await Promise.all(messages.map(async (msg) => {
-      const full = await gmail.users.messages.get({ userId: 'me', id: msg.id, format: 'metadata', metadataHeaders: ['From', 'Subject'] })
+      const full = await gmail.users.messages.get({
+        userId: 'me',
+        id: msg.id,
+        format: 'metadata',
+        metadataHeaders: ['From', 'Subject'],
+      })
       const headers = full.data.payload.headers
       const from = headers.find(h => h.name === 'From')?.value || 'Inconnu'
       const subject = headers.find(h => h.name === 'Subject')?.value || 'Sans objet'
-      return `- ${from} : ${subject}`
+      return `- [id:${msg.id}] ${from} : ${subject}`
     }))
     return details.join('\n')
   } catch (e) {
@@ -125,4 +128,73 @@ async function getGmailUnread() {
   }
 }
 
-module.exports = { getAuthUrl, handleCallback, getCalendarEvents, createCalendarEvent, getGmailUnread }
+function buildRawEmail(to, subject, body, inReplyTo = null, references = null) {
+  const lines = [
+    `To: ${to}`,
+    `Subject: ${subject}`,
+    'MIME-Version: 1.0',
+    'Content-Type: text/plain; charset=UTF-8',
+  ]
+  if (inReplyTo) lines.push(`In-Reply-To: ${inReplyTo}`)
+  if (references) lines.push(`References: ${references}`)
+  lines.push('', body)
+  const raw = lines.join('\r\n')
+  return Buffer.from(raw).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
+async function sendEmail(to, subject, body) {
+  if (!config.google.refreshToken) return 'Gmail non configuré.'
+  try {
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client })
+    const raw = buildRawEmail(to, subject, body)
+    await gmail.users.messages.send({ userId: 'me', resource: { raw } })
+    return `Mail envoyé à ${to} — "${subject}"`
+  } catch (e) {
+    return 'Erreur envoi mail : ' + e.message
+  }
+}
+
+async function replyEmail(messageId, body) {
+  if (!config.google.refreshToken) return 'Gmail non configuré.'
+  try {
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client })
+
+    // Récupère le message original pour extraire les headers nécessaires
+    const original = await gmail.users.messages.get({
+      userId: 'me',
+      id: messageId,
+      format: 'metadata',
+      metadataHeaders: ['From', 'Subject', 'Message-ID', 'References'],
+    })
+
+    const headers = original.data.payload.headers
+    const from = headers.find(h => h.name === 'From')?.value || ''
+    const subject = headers.find(h => h.name === 'Subject')?.value || ''
+    const msgId = headers.find(h => h.name === 'Message-ID')?.value || ''
+    const refs = headers.find(h => h.name === 'References')?.value || ''
+    const threadId = original.data.threadId
+
+    const replySubject = subject.startsWith('Re:') ? subject : `Re: ${subject}`
+    const references = refs ? `${refs} ${msgId}` : msgId
+
+    const raw = buildRawEmail(from, replySubject, body, msgId, references)
+
+    await gmail.users.messages.send({
+      userId: 'me',
+      resource: { raw, threadId },
+    })
+    return `Réponse envoyée à ${from} — "${replySubject}"`
+  } catch (e) {
+    return 'Erreur réponse mail : ' + e.message
+  }
+}
+
+module.exports = {
+  getAuthUrl,
+  handleCallback,
+  getCalendarEvents,
+  createCalendarEvent,
+  getGmailUnread,
+  sendEmail,
+  replyEmail,
+}

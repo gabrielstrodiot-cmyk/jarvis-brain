@@ -8,6 +8,7 @@ async function processReply(reply) {
   const sideEffects = {}
   const fetchedData = {}
 
+  // REMEMBER
   const rememberMatches = [...text.matchAll(/\[REMEMBER:\s*(.+?)\]/gi)]
   for (const match of rememberMatches) {
     memory.addFact(match[1].trim())
@@ -15,8 +16,8 @@ async function processReply(reply) {
   }
 
   // CALENDAR — créer un événement
-  // Format : [CALENDAR_CREATE: titre | 2026-05-13T18:00 | 2026-05-13T19:00]
-  // Format avec description : [CALENDAR_CREATE: titre | 2026-05-13T18:00 | 2026-05-13T19:00 | description]
+  // Format : [CALENDAR_CREATE: titre | 2026-05-13T18:00:00 | 2026-05-13T19:00:00]
+  // Format avec description : [CALENDAR_CREATE: titre | 2026-05-13T18:00:00 | 2026-05-13T19:00:00 | description]
   const calendarCreateMatches = [...text.matchAll(/\[CALENDAR_CREATE:\s*(.+?)\s*\|\s*(.+?)\s*\|\s*(.+?)(?:\s*\|\s*([\s\S]+?))?\]/gi)]
   for (const match of calendarCreateMatches) {
     const summary = match[1].trim()
@@ -30,6 +31,39 @@ async function processReply(reply) {
     } catch (e) {
       text = text.replace(match[0], '').trim()
       text += `\nErreur Calendar : ${e.message}`
+    }
+  }
+
+  // GMAIL — envoyer un mail
+  // Format : [GMAIL_SEND: destinataire@email.com | Sujet | Corps du message]
+  const gmailSendMatch = text.match(/\[GMAIL_SEND:\s*(.+?)\s*\|\s*(.+?)\s*\|\s*([\s\S]+?)\]/i)
+  if (gmailSendMatch) {
+    const to = gmailSendMatch[1].trim()
+    const subject = gmailSendMatch[2].trim()
+    const body = gmailSendMatch[3].trim()
+    try {
+      const result = await google.sendEmail(to, subject, body)
+      text = text.replace(/\[GMAIL_SEND:[\s\S]+?\]/i, '').trim()
+      text += `\n${result}`
+    } catch (e) {
+      text = text.replace(/\[GMAIL_SEND:[\s\S]+?\]/i, '').trim()
+      text += `\nErreur Gmail : ${e.message}`
+    }
+  }
+
+  // GMAIL — répondre à un mail
+  // Format : [GMAIL_REPLY: messageId | Corps de la réponse]
+  const gmailReplyMatch = text.match(/\[GMAIL_REPLY:\s*(.+?)\s*\|\s*([\s\S]+?)\]/i)
+  if (gmailReplyMatch) {
+    const messageId = gmailReplyMatch[1].trim()
+    const body = gmailReplyMatch[2].trim()
+    try {
+      const result = await google.replyEmail(messageId, body)
+      text = text.replace(/\[GMAIL_REPLY:[\s\S]+?\]/i, '').trim()
+      text += `\n${result}`
+    } catch (e) {
+      text = text.replace(/\[GMAIL_REPLY:[\s\S]+?\]/i, '').trim()
+      text += `\nErreur Gmail reply : ${e.message}`
     }
   }
 
