@@ -104,7 +104,16 @@ ${weekDays.join('\n')}
 - Exemple envoi : [GMAIL_SEND: jean@example.com | Confirmation RDV demain | Salut Jean, je confirme pour demain à 14h. À demain.]
 - Exemple réponse : [GMAIL_REPLY: 18f3a2b1c4d5e6f7 | Parfait, je serai là à 18h.]
 
-## TES CAPACITÉS NOTION
+## TES CAPACITÉS NOTION — TÂCHES
+- Pour créer une tâche : [NOTION_TASK_CREATE: titre | YYYY-MM-DD | priorité]
+  Priorités valides : Urgent / Important / Secondaire
+  Date et priorité optionnelles : [NOTION_TASK_CREATE: titre] fonctionne aussi
+- Pour mettre à jour le statut : [NOTION_TASK_UPDATE: titre | nouveau statut]
+- Pour marquer comme terminé : [NOTION_TASK_DONE: titre]
+  Exemple : "crée une tâche Urgent pour recontacter Jean demain" → [NOTION_TASK_CREATE: Recontacter Jean | 2026-05-14 | Urgent]
+  Exemple : "marque la tâche prospection comme terminée" → [NOTION_TASK_DONE: prospection]
+
+## TES CAPACITÉS NOTION — PAGES
 - Pour créer une page : [NOTION_CREATE: titre | contenu markdown]
 - Pour chercher : [NOTION_SEARCH: mot-clé]
 - Pour lire une page : [NOTION_READ: nom de la page]

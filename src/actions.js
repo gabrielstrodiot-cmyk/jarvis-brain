@@ -67,6 +67,55 @@ async function processReply(reply) {
     }
   }
 
+  // NOTION TASK — créer une tâche
+  // Format : [NOTION_TASK_CREATE: titre | YYYY-MM-DD | Urgent]
+  // Date et priorité optionnelles : [NOTION_TASK_CREATE: titre]
+  const notionTaskCreateMatch = text.match(/\[NOTION_TASK_CREATE:\s*([^|\]]+?)(?:\s*\|\s*([^|\]]+?))?(?:\s*\|\s*([^|\]]+?))?\]/i)
+  if (notionTaskCreateMatch) {
+    const name = notionTaskCreateMatch[1].trim()
+    const date = notionTaskCreateMatch[2]?.trim() || null
+    const priority = notionTaskCreateMatch[3]?.trim() || null
+    try {
+      const result = await notion.createTask(name, date, priority)
+      text = text.replace(/\[NOTION_TASK_CREATE:[\s\S]+?\]/i, '').trim()
+      text += `\n${result}`
+    } catch (e) {
+      text = text.replace(/\[NOTION_TASK_CREATE:[\s\S]+?\]/i, '').trim()
+      text += `\nErreur création tâche : ${e.message}`
+    }
+  }
+
+  // NOTION TASK — mettre à jour le statut
+  // Format : [NOTION_TASK_UPDATE: titre | nouveau statut]
+  const notionTaskUpdateMatch = text.match(/\[NOTION_TASK_UPDATE:\s*(.+?)\s*\|\s*(.+?)\]/i)
+  if (notionTaskUpdateMatch) {
+    const taskName = notionTaskUpdateMatch[1].trim()
+    const status = notionTaskUpdateMatch[2].trim()
+    try {
+      const result = await notion.updateTaskStatus(taskName, status)
+      text = text.replace(/\[NOTION_TASK_UPDATE:[\s\S]+?\]/i, '').trim()
+      text += `\n${result}`
+    } catch (e) {
+      text = text.replace(/\[NOTION_TASK_UPDATE:[\s\S]+?\]/i, '').trim()
+      text += `\nErreur update tâche : ${e.message}`
+    }
+  }
+
+  // NOTION TASK — marquer comme terminé
+  // Format : [NOTION_TASK_DONE: titre]
+  const notionTaskDoneMatch = text.match(/\[NOTION_TASK_DONE:\s*(.+?)\]/i)
+  if (notionTaskDoneMatch) {
+    const taskName = notionTaskDoneMatch[1].trim()
+    try {
+      const result = await notion.markTaskDone(taskName)
+      text = text.replace(/\[NOTION_TASK_DONE:[^\]]+\]/i, '').trim()
+      text += `\n${result}`
+    } catch (e) {
+      text = text.replace(/\[NOTION_TASK_DONE:[^\]]+\]/i, '').trim()
+      text += `\nErreur done tâche : ${e.message}`
+    }
+  }
+
   // OBSIDIAN — stocke dans fetchedData au lieu de remplacer inline
   const obsidianReadMatch = text.match(/\[OBSIDIAN_READ:\s*(.+?)\]/i)
   if (obsidianReadMatch) {
@@ -116,7 +165,7 @@ async function processReply(reply) {
     }
   }
 
-  // NOTION
+  // NOTION — pages génériques
   const notionCreateMatch = text.match(/\[NOTION_CREATE:\s*(.+?)\s*\|\s*([\s\S]+?)\]/i)
   if (notionCreateMatch) {
     const title = notionCreateMatch[1].trim()

@@ -123,4 +123,63 @@ async function getActiveProjects() {
   }
 }
 
-module.exports = { search, readPage, appendToPage, createPage, loadFacts, saveFacts, getActiveTasks, getActiveProjects }
+// ── TÂCHES — WRITE ─────────────────────────────────────────────
+
+async function findTaskByName(name) {
+  const data = await notionRequest('POST', `/databases/${config.notion.tasksDbId}/query`, {
+    filter: {
+      property: 'Name',
+      title: { contains: name }
+    },
+    page_size: 5
+  })
+  return data.results || []
+}
+
+async function createTask(name, date = null, priority = null) {
+  const properties = {
+    Name: { title: [{ text: { content: name } }] },
+  }
+  if (date) {
+    properties.Jour = { date: { start: date } }
+  }
+  if (priority) {
+    properties.Prioritée = { select: { name: priority } }
+  }
+
+  await notionRequest('POST', '/pages', {
+    parent: { database_id: config.notion.tasksDbId },
+    properties,
+  })
+  return `Tâche créée : "${name}"${priority ? ` [${priority}]` : ''}${date ? ` pour le ${date}` : ''}`
+}
+
+async function updateTaskStatus(taskName, status) {
+  const tasks = await findTaskByName(taskName)
+  if (tasks.length === 0) return `Tâche "${taskName}" introuvable dans Notion`
+  const task = tasks[0]
+  await notionRequest('PATCH', `/pages/${task.id}`, {
+    properties: {
+      Statut: { select: { name: status } },
+    },
+  })
+  return `Tâche "${taskName}" → ${status}`
+}
+
+async function markTaskDone(taskName) {
+  return updateTaskStatus(taskName, 'Terminer ✅')
+}
+
+module.exports = {
+  search,
+  readPage,
+  appendToPage,
+  createPage,
+  loadFacts,
+  saveFacts,
+  getActiveTasks,
+  getActiveProjects,
+  createTask,
+  updateTaskStatus,
+  markTaskDone,
+}
