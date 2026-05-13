@@ -12,7 +12,7 @@ const config = {
     token: process.env.NOTION_TOKEN,
     memoryPageId: '346a16a5-dea2-811b-a3c2-e15932a2fb19',
     checkinPageId: '347a16a5-dea2-81a0-b479-cb00f2f6d772',
-    tasksDbId: '35ca16a5-dea2-8078-9221-cc2617577a41',
+    tasksDbId: '35fa16a5-dea2-80fb-9973-d76ba7e3cb6e',
     projectsDbId: '346a16a5-dea2-81cf-b4db-e032fae39308',
   },
   google: {

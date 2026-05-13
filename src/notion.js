@@ -84,7 +84,7 @@ async function getActiveTasks() {
     const data = await notionRequest('POST', `/databases/${config.notion.tasksDbId}/query`, {
       filter: {
         property: 'Statut',
-        select: { does_not_equal: 'Terminer ✅' }
+        select: { does_not_equal: 'Terminé' }
       },
       sorts: [{ property: 'Prioritée', direction: 'ascending' }],
       page_size: 15
@@ -167,7 +167,7 @@ async function updateTaskStatus(taskName, status) {
 }
 
 async function markTaskDone(taskName) {
-  return updateTaskStatus(taskName, 'Terminer ✅')
+  return updateTaskStatus(taskName, 'Terminé')
 }
 
 module.exports = {
