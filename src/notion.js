@@ -126,14 +126,16 @@ async function getActiveProjects() {
 // ── TÂCHES — WRITE ─────────────────────────────────────────────
 
 async function findTaskByName(name) {
-  const data = await notionRequest('POST', `/databases/${config.notion.tasksDbId}/query`, {
-    filter: {
-      property: 'Name',
-      title: { contains: name }
-    },
-    page_size: 5
+  const data = await notionRequest('POST', '/search', {
+    query: name,
+    filter: { property: 'object', value: 'page' },
+    page_size: 10
   })
-  return data.results || []
+  const tasksDbId = config.notion.tasksDbId.replace(/-/g, '')
+  return (data.results || []).filter(r => {
+    const parentId = (r.parent && r.parent.database_id || '').replace(/-/g, '')
+    return parentId === tasksDbId
+  })
 }
 
 async function createTask(name, date = null, priority = null) {
