@@ -71,7 +71,8 @@ function getPositionFromMemory() {
   }
 }
 
-// ── HTML SÉCURISÉ ─────────────────────────────────────────────
+// ── HTML SÉCURISÉ POUR LE BRIEFING ───────────────────────────
+// Échappe tout, puis restaure uniquement <b> et </b>
 function sanitizeBriefingHtml(text) {
   return text
     .replace(/&/g, '&amp;')
@@ -239,7 +240,7 @@ async function sendQuizPoll(chatId, note) {
         type: 'quiz',
         correct_option_id: quiz.correct_index,
         explanation: quiz.explanation,
-        is_anonymous: false,
+        is_anonymous: false
       }
     )
 
@@ -247,6 +248,7 @@ async function sendQuizPoll(chatId, note) {
     console.log(`✅ Quiz envoyé — ${note.name}`)
   } catch (e) {
     console.error('sendQuizPoll error:', e.message)
+    // Fallback silencieux — le quiz ne bloque pas le briefing
   }
 }
 
@@ -262,6 +264,7 @@ async function sendMorningBriefing() {
     console.log('🌅 Envoi morning briefing...')
     await memory.load()
 
+    // Position et météo
     const position = getPositionFromMemory()
     let weatherLine = null
     if (position) {
@@ -272,6 +275,7 @@ async function sendMorningBriefing() {
       ? `${weatherLine} à ${position.city}`
       : 'Position inconnue — envoie ta localisation Telegram pour activer la météo'
 
+    // Fetch toutes les données en parallèle
     const [calendarEvents, gmailUnread, tasks, projects, recentlyTestedPaths] = await Promise.all([
       getCalendarEvents(),
       getGmailUnread(),
@@ -305,6 +309,7 @@ SECTIONS dans cet ordre :
     await bot.sendMessage(chatId, `🌅 <b>Morning Briefing</b>\n\n${safeHtml}`, { parse_mode: 'HTML' })
     console.log('✅ Morning briefing envoyé')
 
+    // Quiz séparé (fire-and-forget sur le briefing)
     const note = await obsidian.getNoteForQuiz(recentlyTestedPaths)
     if (note) {
       await sendQuizPoll(chatId, note)
@@ -336,7 +341,7 @@ bot.on('message', async (msg) => {
   try {
     await bot.sendChatAction(chatId, 'typing')
     const reply = await handleMessage(chatId, msg.text)
-    await bot.sendMessage(chatId, sanitizeBriefingHtml(reply), { parse_mode: 'HTML' })
+    await bot.sendMessage(chatId, reply)
   } catch (e) {
     console.error('Message error:', e.message)
     await bot.sendMessage(chatId, `Erreur : ${e.message}`)
@@ -367,7 +372,7 @@ bot.on('voice', async (msg) => {
     }
 
     const reply = await handleMessage(chatId, transcript)
-    await bot.sendMessage(chatId, sanitizeBriefingHtml(reply), { parse_mode: 'HTML' })
+    await bot.sendMessage(chatId, reply)
   } catch (e) {
     console.error('Voice error:', e.message)
     await bot.sendMessage(chatId, `Erreur : ${e.message}`)
@@ -399,7 +404,7 @@ bot.on('photo', async (msg) => {
     console.log(`🖼️  Photo reçue — ${photo.width}x${photo.height} — caption: "${caption}"`)
 
     const reply = await handleImageMessage(chatId, caption, base64, mimeType)
-    await bot.sendMessage(chatId, sanitizeBriefingHtml(reply), { parse_mode: 'HTML' })
+    await bot.sendMessage(chatId, reply)
   } catch (e) {
     console.error('Photo error:', e.message)
     await bot.sendMessage(chatId, `Erreur : ${e.message}`)
@@ -417,6 +422,9 @@ bot.on('location', async (msg) => {
     const { latitude, longitude } = msg.location
     await memory.load()
 
+    // Reverse geocode léger via open-meteo (pas de clé nécessaire)
+    // On stocke juste les coordonnées — la ville sera "ta position"
+    // Pour avoir le nom de ville, on utilise l'API nominatim (OpenStreetMap, gratuite)
     let cityName = 'ta position'
     try {
       const geo = await fetch(
@@ -446,6 +454,8 @@ bot.on('location', async (msg) => {
     await bot.sendMessage(chatId, `Erreur enregistrement position : ${e.message}`)
   }
 })
+
+bot.__triggerBriefing = sendMorningBriefing
 
 bot.__triggerBriefing = sendMorningBriefing
 module.exports = bot

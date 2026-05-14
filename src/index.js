@@ -51,6 +51,15 @@ app.post('/briefing', async (req, res) => {
   } catch (e) { console.error('Briefing trigger error:', e.message) }
 })
 
+app.post('/memory/facts/bulk', async (req, res) => {
+  const { facts } = req.body
+  if (!Array.isArray(facts)) return res.status(400).json({ error: 'facts doit être un array' })
+  await memory.load()
+  for (const fact of facts) memory.addFact(fact)
+  await memory.persist()
+  res.json({ ok: true, factsCount: memory.get().facts.length })
+})
+
 app.get('/health', (req, res) => {
   res.json({
     status: '🤖 Jarvis is alive',
