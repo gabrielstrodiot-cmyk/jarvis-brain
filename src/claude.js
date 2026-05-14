@@ -166,32 +166,37 @@ async function generate(systemPrompt, userMessage, maxTokens = 500) {
 
 // ── GÉNÉRATION DE QUIZ ────────────────────────────────────────
 async function generateQuizContent(noteContent, noteName) {
-  const prompt = `Tu es un créateur de quiz d'apprentissage. Voici le contenu d'une note Obsidian intitulée "${noteName}" :
+  const prompt = `Tu es un créateur de quiz. Voici une note Obsidian : "${noteName}"
 
-${noteContent.slice(0, 1500)}
+${noteContent.slice(0, 1200)}
 
-Génère un quiz en JSON valide uniquement (sans markdown, sans backticks) :
-{
-  "question": "Question de compréhension sur le concept principal",
-  "options": ["option A", "option B", "option C", "option D"],
-  "correct_index": 0,
-  "explanation": "Explication courte de la bonne réponse (max 80 mots)"
-}
+Génère un quiz JSON valide uniquement (sans markdown, sans backticks).
+CONTRAINTES STRICTES :
+- "question" : max 200 caractères
+- chaque option dans "options" : max 90 caractères, exactement 4 options
+- "correct_index" : entier entre 0 et 3
+- "explanation" : max 180 caractères
 
-Règles :
-- 1 seule bonne réponse, correct_index entre 0 et 3
-- Les 3 mauvaises réponses doivent être plausibles, pas absurdes
-- La question teste la compréhension, pas la mémorisation mot pour mot
-- Réponds UNIQUEMENT avec le JSON brut, rien d'autre`
+Format exact sur une seule ligne :
+{"question":"...","options":["...","...","...","..."],"correct_index":0,"explanation":"..."}
+
+Réponds UNIQUEMENT avec le JSON brut, rien d'autre.`
 
   const response = await client.messages.create({
     model: 'claude-sonnet-4-5',
-    max_tokens: 600,
+    max_tokens: 400,
     messages: [{ role: 'user', content: prompt }],
   })
   const text = response.content[0].text.trim()
   const clean = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
-  return JSON.parse(clean)
+  const parsed = JSON.parse(clean)
+
+  // Garde-fous Telegram
+  parsed.question = parsed.question.slice(0, 295)
+  parsed.options = parsed.options.slice(0, 4).map(o => o.slice(0, 95))
+  parsed.explanation = (parsed.explanation || '').slice(0, 195)
+
+  return parsed
 }
 
 module.exports = { chat, chatWithImage, generate, buildSystemPrompt, generateQuizContent }
