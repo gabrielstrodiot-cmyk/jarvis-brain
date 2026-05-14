@@ -43,6 +43,14 @@ app.delete('/memory/history', async (req, res) => {
   res.json({ ok: true })
 })
 
+app.post('/briefing', async (req, res) => {
+  res.json({ ok: true, message: 'Briefing déclenché' })
+  try {
+    const telegramRouter = require('./routes/telegram')
+    if (telegramRouter.__triggerBriefing) telegramRouter.__triggerBriefing()
+  } catch (e) { console.error('Briefing trigger error:', e.message) }
+})
+
 app.get('/health', (req, res) => {
   res.json({
     status: '🤖 Jarvis is alive',

@@ -455,4 +455,7 @@ bot.on('location', async (msg) => {
   }
 })
 
+bot.__triggerBriefing = sendMorningBriefing
+
+bot.__triggerBriefing = sendMorningBriefing
 module.exports = bot
