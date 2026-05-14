@@ -41,13 +41,16 @@ function getBrusselsDateContext() {
   return { dateStr, timeStr, isoToday, isoNow, weekDays }
 }
 
-function buildSystemPrompt(calendarEvents, gmailUnread, tasks, projects, obsidianNote) {
+function buildSystemPrompt(calendarEvents, gmailUnread, tasks, projects, obsidianNote, ragContext = null) {
   const facts = memory.formatFactsForPrompt()
   const calendar = calendarEvents ? `\n\n## AGENDA DU JOUR\n${calendarEvents}` : ''
   const gmail = gmailUnread ? `\n\n## MAILS NON LUS\n${gmailUnread}` : ''
   const tasksSection = tasks ? `\n\n## TÂCHES ACTIVES\n${tasks}` : ''
   const projectsSection = projects ? `\n\n## PROJETS EN COURS\n${projects}` : ''
   const obsidianSection = obsidianNote ? `\n\n## NOTE OBSIDIAN DU JOUR (${obsidianNote.name})\n${obsidianNote.preview}` : ''
+  const ragSection = ragContext
+    ? `\n\n## MÉMOIRE SÉMANTIQUE — EXTRAITS PERTINENTS\n${ragContext}\n(Ces extraits viennent de la mémoire personnelle de Gabriel — utilise-les pour personnaliser ta réponse si pertinent. Ne les cite pas mot pour mot.)`
+    : ''
 
   const { dateStr, timeStr, isoToday, isoNow, weekDays } = getBrusselsDateContext()
 
@@ -72,7 +75,7 @@ ${weekDays.join('\n')}
 - Créateur de la méthode FLOW — transformation physique et mentale pour hommes 20-35 ans
 - Business en ligne : contenu Instagram, programmes, coaching 1-1
 - Profil : ambitieux, direct, va à l'essentiel, aime les systèmes et l'automatisation
-- Outils : Make, iPhone, VS Code, Railway, GitHub, Notion${facts}${calendar}${gmail}${tasksSection}${projectsSection}${obsidianSection}
+- Outils : Make, iPhone, VS Code, Railway, GitHub, Notion${facts}${calendar}${gmail}${tasksSection}${projectsSection}${obsidianSection}${ragSection}
 
 ## TA PERSONNALITÉ
 - Direct, concis, actionnable
@@ -126,13 +129,30 @@ ${weekDays.join('\n')}
 - Quand tu peux agir, agis — ne demande pas de confirmation pour des actions simples`
 }
 
+async function getRagContext(message) {
+  try {
+    const { searchSimilar } = require('./embeddings')
+    const similar = await searchSimilar(message, 5)
+    if (similar.length === 0) return null
+    return similar
+      .map((r, i) => `[${i + 1}] (${r.source})\n${r.content.slice(0, 600)}`)
+      .join('\n\n---\n\n')
+  } catch (e) {
+    // RAG non bloquant
+    return null
+  }
+}
+
 async function chat(message, calendarEvents = null, gmailUnread = null, tasks = null, projects = null, obsidianNote = null) {
   const historyMessages = memory.getHistoryMessages()
   memory.addToHistory('user', message)
+
+  const ragContext = await getRagContext(message)
+
   const response = await client.messages.create({
     model: 'claude-sonnet-4-5',
     max_tokens: 2048,
-    system: buildSystemPrompt(calendarEvents, gmailUnread, tasks, projects, obsidianNote),
+    system: buildSystemPrompt(calendarEvents, gmailUnread, tasks, projects, obsidianNote, ragContext),
     messages: [...historyMessages, { role: 'user', content: message }],
   })
   return response.content[0].text
@@ -145,10 +165,13 @@ async function chatWithImage(message, imageBase64, imageMimeType, calendarEvents
     { type: 'text', text: message },
   ]
   memory.addToHistory('user', `[IMAGE] ${message}`)
+
+  const ragContext = await getRagContext(message)
+
   const response = await client.messages.create({
     model: 'claude-sonnet-4-5',
     max_tokens: 2048,
-    system: buildSystemPrompt(calendarEvents, gmailUnread, tasks, projects, null),
+    system: buildSystemPrompt(calendarEvents, gmailUnread, tasks, projects, null, ragContext),
     messages: [...historyMessages, { role: 'user', content: userContent }],
   })
   return response.content[0].text
@@ -164,7 +187,6 @@ async function generate(systemPrompt, userMessage, maxTokens = 500) {
   return response.content[0].text.trim()
 }
 
-// ── GÉNÉRATION DE QUIZ ────────────────────────────────────────
 async function generateQuizContent(noteContent, noteName) {
   const prompt = `Tu es un créateur de quiz. Voici une note Obsidian : "${noteName}"
 
@@ -191,7 +213,6 @@ Réponds UNIQUEMENT avec le JSON brut, rien d'autre.`
   const clean = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
   const parsed = JSON.parse(clean)
 
-  // Garde-fous Telegram
   parsed.question = parsed.question.slice(0, 295)
   parsed.options = parsed.options.slice(0, 4).map(o => o.slice(0, 95))
   parsed.explanation = (parsed.explanation || '').slice(0, 195)

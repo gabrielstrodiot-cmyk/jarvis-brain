@@ -4,6 +4,7 @@ const memory = require('./memory')
 const notion = require('./notion')
 const { getCalendarEvents } = require('./google')
 const db = require('./db')
+const embeddings = require('./embeddings')
 
 const app = express()
 app.use(express.json({ limit: '10mb' }))
@@ -60,6 +61,27 @@ app.post('/memory/facts/bulk', async (req, res) => {
   res.json({ ok: true, factsCount: memory.get().facts.length })
 })
 
+// ── RAG ──────────────────────────────────────────────────────
+app.post('/rag/index', async (req, res) => {
+  res.json({ ok: true, message: 'Indexation démarrée en arrière-plan' })
+  try {
+    const journalResult = await embeddings.indexNotionJournal()
+    const convResult = await embeddings.indexConversations()
+    console.log('✅ RAG indexation terminée:', { journal: journalResult, conversations: convResult })
+  } catch (e) {
+    console.error('🔴 /rag/index error:', e.message)
+  }
+})
+
+app.get('/rag/status', async (req, res) => {
+  try {
+    const count = await db.getEmbeddingsCount()
+    res.json({ ok: true, embeddingsCount: count })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
 app.get('/health', (req, res) => {
   res.json({
     status: '🤖 Jarvis is alive',
@@ -75,7 +97,8 @@ app.get('/health', (req, res) => {
   })
 })
 
-async function start() {await db.init() 
+async function start() {
+  await db.init()
   try {
     await memory.load()
     console.log(`🧠 Mémoire chargée : ${memory.get().facts.length} facts`)
