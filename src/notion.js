@@ -84,7 +84,7 @@ async function getActiveTasks() {
     const data = await notionRequest('POST', `/databases/${config.notion.tasksDbId}/query`, {
       filter: {
         property: 'État',
-        select: { does_not_equal: 'Fini' }
+        status: { does_not_equal: 'Fini' }
       },
       sorts: [{ property: 'Prioritée', direction: 'ascending' }],
       page_size: 15
@@ -108,7 +108,7 @@ async function getActiveProjects() {
     const data = await notionRequest('POST', `/databases/${config.notion.projectsDbId}/query`, {
       filter: {
         property: 'État',
-        select: { equals: 'En cours' }
+        status: { equals: 'En cours' }
       },
       page_size: 10
     })
@@ -162,7 +162,7 @@ async function updateTaskStatus(taskName, status) {
   const task = tasks[0]
   await notionRequest('PATCH', `/pages/${task.id}`, {
     properties: {
-      État: { select: { name: status } },
+      État: { status: { name: status } },
     },
   })
   return `Tâche "${taskName}" → ${status}`
