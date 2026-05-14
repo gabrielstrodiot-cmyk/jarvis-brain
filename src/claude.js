@@ -107,6 +107,8 @@ ${weekDays.join('\n')}
 ## TES CAPACITÉS NOTION — TÂCHES
 - Pour créer une tâche : [NOTION_TASK_CREATE: titre | YYYY-MM-DD | priorité]
   Priorités valides : Urgent / Important / Secondaire
+  Statuts valides : A faire / Planifié / En attente / Commencé / Fini
+  Pour marquer terminé : Fini
   Date et priorité optionnelles : [NOTION_TASK_CREATE: titre] fonctionne aussi
 - Pour mettre à jour le statut : [NOTION_TASK_UPDATE: titre | nouveau statut]
 - Pour marquer comme terminé : [NOTION_TASK_DONE: titre]
