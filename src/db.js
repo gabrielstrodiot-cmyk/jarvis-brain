@@ -42,7 +42,21 @@ async function init() {
         updated_at TIMESTAMPTZ  DEFAULT NOW()
       )
     `)
-    console.log('🗄️  PostgreSQL tables ready (conversations + facts + quiz_log + embeddings)')
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS draft_notes (
+        id                  SERIAL      PRIMARY KEY,
+        subject             TEXT        NOT NULL,
+        content             TEXT        NOT NULL,
+        obsidian_path       TEXT,
+        status              VARCHAR(30) DEFAULT 'awaiting_validation',
+        telegram_message_id BIGINT,
+        revision_count      INTEGER     DEFAULT 0,
+        revision_feedback   TEXT,
+        created_at          TIMESTAMPTZ DEFAULT NOW(),
+        updated_at          TIMESTAMPTZ DEFAULT NOW()
+      )
+    `)
+    console.log('🗄️  PostgreSQL tables ready (conversations + facts + quiz_log + embeddings + draft_notes)')
   } catch (e) {
     console.error('🔴 PostgreSQL init error:', e.message)
     throw e
@@ -50,24 +64,19 @@ async function init() {
 }
 
 async function saveMessage(role, content) {
-  await pool.query(
-    'INSERT INTO conversations (role, content) VALUES ($1, $2)',
-    [role, content]
-  )
+  await pool.query('INSERT INTO conversations (role, content) VALUES ($1, $2)', [role, content])
 }
 
 async function loadHistory(limit = 20) {
   const result = await pool.query(
-    `SELECT role, content, timestamp FROM conversations ORDER BY timestamp DESC LIMIT $1`,
-    [limit]
+    `SELECT role, content, timestamp FROM conversations ORDER BY timestamp DESC LIMIT $1`, [limit]
   )
   return result.rows.reverse()
 }
 
 async function loadAllHistory(limit = 300) {
   const result = await pool.query(
-    `SELECT id, role, content, timestamp FROM conversations ORDER BY timestamp ASC LIMIT $1`,
-    [limit]
+    `SELECT id, role, content, timestamp FROM conversations ORDER BY timestamp ASC LIMIT $1`, [limit]
   )
   return result.rows
 }
@@ -90,10 +99,7 @@ async function saveFacts(facts) {
   try {
     await pool.query('DELETE FROM facts')
     for (const fact of facts) {
-      await pool.query(
-        'INSERT INTO facts (content) VALUES ($1) ON CONFLICT (content) DO NOTHING',
-        [fact]
-      )
+      await pool.query('INSERT INTO facts (content) VALUES ($1) ON CONFLICT (content) DO NOTHING', [fact])
     }
   } catch (e) {
     console.error('🔴 saveFacts error:', e.message)
@@ -111,9 +117,7 @@ async function logQuizNote(notePath) {
 async function getRecentlyTestedPaths(days = 7) {
   try {
     const result = await pool.query(
-      `SELECT DISTINCT note_path FROM quiz_log
-       WHERE tested_at > NOW() - ($1 || ' days')::INTERVAL`,
-      [days]
+      `SELECT DISTINCT note_path FROM quiz_log WHERE tested_at > NOW() - ($1 || ' days')::INTERVAL`, [days]
     )
     return result.rows.map(r => r.note_path)
   } catch (e) {
@@ -127,8 +131,7 @@ async function saveEmbedding(content, embedding, source, sourceId) {
     await pool.query(
       `INSERT INTO embeddings (content, embedding, source, source_id, updated_at)
        VALUES ($1, $2::vector, $3, $4, NOW())
-       ON CONFLICT (source_id) DO UPDATE
-       SET content = $1, embedding = $2::vector, updated_at = NOW()`,
+       ON CONFLICT (source_id) DO UPDATE SET content = $1, embedding = $2::vector, updated_at = NOW()`,
       [content, JSON.stringify(embedding), source, sourceId]
     )
   } catch (e) {
@@ -140,10 +143,8 @@ async function searchEmbeddings(queryEmbedding, limit = 5) {
   try {
     const result = await pool.query(
       `SELECT content, source, 1 - (embedding <=> $1::vector) AS similarity
-       FROM embeddings
-       WHERE embedding IS NOT NULL
-       ORDER BY embedding <=> $1::vector
-       LIMIT $2`,
+       FROM embeddings WHERE embedding IS NOT NULL
+       ORDER BY embedding <=> $1::vector LIMIT $2`,
       [JSON.stringify(queryEmbedding), limit]
     )
     return result.rows
@@ -162,9 +163,45 @@ async function getEmbeddingsCount() {
   }
 }
 
+async function saveDraft(subject, content, obsidianPath) {
+  const result = await pool.query(
+    `INSERT INTO draft_notes (subject, content, obsidian_path) VALUES ($1, $2, $3) RETURNING id`,
+    [subject, content, obsidianPath]
+  )
+  return result.rows[0].id
+}
+
+async function getDraft(id) {
+  const result = await pool.query('SELECT * FROM draft_notes WHERE id = $1', [id])
+  return result.rows[0] || null
+}
+
+async function updateDraft(id, fields) {
+  const { content, status, telegramMessageId, revisionFeedback, revisionCount } = fields
+  await pool.query(
+    `UPDATE draft_notes SET
+      content             = COALESCE($2, content),
+      status              = COALESCE($3, status),
+      telegram_message_id = COALESCE($4, telegram_message_id),
+      revision_feedback   = COALESCE($5, revision_feedback),
+      revision_count      = COALESCE($6, revision_count),
+      updated_at          = NOW()
+     WHERE id = $1`,
+    [id, content ?? null, status ?? null, telegramMessageId ?? null, revisionFeedback ?? null, revisionCount ?? null]
+  )
+}
+
+async function getPendingDrafts() {
+  const result = await pool.query(
+    `SELECT * FROM draft_notes WHERE status = 'awaiting_validation' ORDER BY created_at ASC`
+  )
+  return result.rows
+}
+
 module.exports = {
   init, saveMessage, loadHistory, loadAllHistory, clearHistory,
   loadFacts, saveFacts,
   logQuizNote, getRecentlyTestedPaths,
-  saveEmbedding, searchEmbeddings, getEmbeddingsCount
+  saveEmbedding, searchEmbeddings, getEmbeddingsCount,
+  saveDraft, getDraft, updateDraft, getPendingDrafts,
 }
