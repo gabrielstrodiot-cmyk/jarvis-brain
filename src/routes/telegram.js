@@ -163,13 +163,75 @@ async function handleMessage(chatId, text) {
   }
 
   await memory.load()
+
+  // ── DRAFT VALIDATION (prioritaire sur le flux normal) ────────
+  try {
+    const pendingDrafts = await db.getPendingDrafts()
+    if (pendingDrafts.length > 0) {
+      const draft = pendingDrafts[0]
+      const normalized = text.toLowerCase().trim()
+      const isDraftResponse = normalized.length < 80 && !text.includes('[')
+
+      if (isDraftResponse) {
+        // Validation positive
+        if (['oui', 'ok', 'valide', 'go', 'yes'].includes(normalized)) {
+          try {
+            await obsidian.writeNote(draft.obsidian_path, draft.content)
+            await db.updateDraft(draft.id, { status: 'validated' })
+            const reply = `Note validée — "${draft.subject}" écrite dans Obsidian.`
+            memory.addToHistory('user', text)
+            memory.addToHistory('assistant', reply)
+            await memory.persist()
+            return reply
+          } catch (e) {
+            return `Erreur écriture Obsidian : ${e.message}`
+          }
+        }
+
+        // Rejet
+        if (['non', 'annule', 'cancel', 'no'].includes(normalized)) {
+          await db.updateDraft(draft.id, { status: 'rejected' })
+          const reply = `Draft "${draft.subject}" annulé.`
+          memory.addToHistory('user', text)
+          memory.addToHistory('assistant', reply)
+          await memory.persist()
+          return reply
+        }
+
+        // Feedback de révision
+        await bot.sendChatAction(chatId, 'typing')
+        try {
+          const newContent = await claudeClient.generateDraftContent(
+            draft.subject, null, draft.content, text
+          )
+          await db.updateDraft(draft.id, {
+            content: newContent,
+            revisionFeedback: text,
+            revisionCount: (draft.revision_count || 0) + 1
+          })
+          const preview = newContent.length > 900 ? newContent.slice(0, 900) + '\n...' : newContent
+          const reply = `Version révisée :\n\n${preview}\n\nValider ? (oui / non / feedback)`
+          memory.addToHistory('user', text)
+          memory.addToHistory('assistant', `[Draft révisé — "${draft.subject}"]`)
+          await memory.persist()
+          return reply
+        } catch (e) {
+          return `Erreur révision : ${e.message}`
+        }
+      }
+    }
+  } catch (e) {
+    console.error('Draft validation check error:', e.message)
+  }
+
+  // ── FLUX NORMAL ───────────────────────────────────────────────
   const [calendarEvents, gmailUnread] = await Promise.all([
     getCalendarEvents(),
     getGmailUnread(),
   ])
 
   const rawReply = await claudeClient.chat(text, calendarEvents, gmailUnread)
-  const { text: processedReply, fetchedData } = await actions.processReply(rawReply)
+  const { text: processedReply, fetchedData, sideEffects } = await actions.processReply(rawReply)
 
   let finalReply = processedReply
 
@@ -185,6 +247,31 @@ async function handleMessage(chatId, text) {
 
   memory.addToHistory('assistant', finalReply)
   await memory.persist()
+
+  // ── DRAFT CREATION (en arrière-plan après la réponse normale) ─
+  if (sideEffects && sideEffects.draftCreate) {
+    const subject = sideEffects.draftCreate
+    setImmediate(async () => {
+      try {
+        await bot.sendChatAction(chatId, 'typing')
+        const draftContent = await claudeClient.generateDraftContent(subject)
+        const safeName = subject
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .replace(/[^a-zA-Z0-9 ]/g, '')
+          .trim()
+        const obsidianPath = `Jarvis/Drafts/${safeName}.md`
+        const draftId = await db.saveDraft(subject, draftContent, obsidianPath)
+        const preview = draftContent.length > 900 ? draftContent.slice(0, 900) + '\n...' : draftContent
+        const draftMsg = `Draft "${subject}" :\n\n${preview}\n\nValider ? (oui / non / feedback)`
+        const sentMsg = await bot.sendMessage(chatId, draftMsg)
+        await db.updateDraft(draftId, { telegramMessageId: sentMsg.message_id })
+      } catch (e) {
+        console.error('Draft generation error:', e.message)
+        await bot.sendMessage(chatId, `Erreur génération draft : ${e.message}`)
+      }
+    })
+  }
 
   return finalReply
 }

@@ -228,6 +228,14 @@ async function processReply(reply) {
     }
   }
 
+// DRAFT — créer un draft de note Obsidian (Couche 2)
+  // Format : [DRAFT_CREATE: sujet]
+  const draftCreateMatch = text.match(/\[DRAFT_CREATE:\s*(.+?)\]/i)
+  if (draftCreateMatch) {
+    sideEffects.draftCreate = draftCreateMatch[1].trim()
+    text = text.replace(/\[DRAFT_CREATE:[^\]]+\]/i, '').trim()
+  }
+
   return { text: text.trim(), sideEffects, fetchedData }
 }
 
