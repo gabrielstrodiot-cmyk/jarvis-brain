@@ -178,6 +178,12 @@ async function handleMessage(chatId, text) {
           try {
             await obsidian.writeNote(draft.obsidian_path, draft.content)
             await db.updateDraft(draft.id, { status: 'validated' })
+            try {
+              const { indexSingleNote } = require('../embeddings')
+              await indexSingleNote('Note Obsidian ' + draft.subject + '
+
+' + draft.content, 'obsidian_' + draft.id)
+            } catch (e) { console.error('Indexing error:', e.message) }
             const reply = `Note validée — "${draft.subject}" écrite dans Obsidian.`
             memory.addToHistory('user', text)
             memory.addToHistory('assistant', reply)

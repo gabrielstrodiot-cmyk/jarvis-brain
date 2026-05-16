@@ -160,4 +160,9 @@ async function indexConversations() {
   return result
 }
 
-module.exports = { searchSimilar, indexNotionJournal, indexConversations }
+async function indexSingleNote(content, sourceId) {
+  const embedding = await createEmbedding(content)
+  await db.saveEmbedding(content, embedding, 'obsidian_validated', sourceId)
+}
+
+module.exports = { searchSimilar, indexNotionJournal, indexConversations, indexSingleNote }
