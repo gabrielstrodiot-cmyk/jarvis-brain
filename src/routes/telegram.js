@@ -133,7 +133,7 @@ async function synthesize(text) {
       },
       body: JSON.stringify({
         text: cleanText,
-        model_id: 'eleven_multilingual_v2',
+        model_id: 'eleven_turbo_v2_5',
         voice_settings: { stability: 0.5, similarity_boost: 0.75, style: 0.3, use_speaker_boost: true },
       }),
     }
@@ -155,9 +155,15 @@ async function sendVoiceReply(chatId, text) {
 }
 
 // ── TRAITEMENT MESSAGE TEXTE ──────────────────────────────────
-async function handleMessage(chatId, text, _tRef) {
+async function handleMessage(chatId, text, _tRef, isVoice = false) {
   // _tRef : timestamp d'entrée passé depuis le handler vocal pour mesure précise
+  // isVoice : contraint Claude à 3 phrases max, sans HTML — réduit latence x4
   const tHandle = _tRef || Date.now()
+
+  // Contrainte vocale injectée dans le message utilisateur
+  const effectiveText = isVoice
+    ? `[MODE VOCAL — réponds en 3 phrases maximum, pas de HTML ni de balises, parle naturellement à voix haute]\n\n${text}`
+    : text
 
   if (!GABRIEL_CHAT_ID) {
     GABRIEL_CHAT_ID = chatId
@@ -238,7 +244,7 @@ async function handleMessage(chatId, text, _tRef) {
   const tContext = Date.now()
   console.log(`[LATENCY] handleMessage — calendar+gmail (parallel) : ${tContext - tContextStart}ms`)
 
-  const rawReply = await claudeClient.chat(text, calendarEvents, gmailUnread)
+  const rawReply = await claudeClient.chat(effectiveText, calendarEvents, gmailUnread)
   const tClaude = Date.now()
   console.log(`[LATENCY] handleMessage — claudeClient.chat : ${tClaude - tContext}ms`)
 
@@ -250,7 +256,7 @@ async function handleMessage(chatId, text, _tRef) {
 
   if (fetchedData && Object.keys(fetchedData).length > 0) {
     const dataContext = Object.values(fetchedData).join('\n\n')
-    const synthesisPrompt = `Gabriel a demandé : "${text}"\n\nDonnées récupérées :\n\n${dataContext}\n\nRéponds à Gabriel de façon naturelle et concise.`
+    const synthesisPrompt = `Gabriel a demandé : "${effectiveText}"\n\nDonnées récupérées :\n\n${dataContext}\n\nRéponds à Gabriel de façon naturelle et concise.`
     const tSynthStart = Date.now()
     finalReply = await claudeClient.generate(
       claudeClient.buildSystemPrompt(calendarEvents, gmailUnread),
@@ -491,7 +497,7 @@ bot.on('voice', async (msg) => {
     }
 
     // ── ÉTAPE 3 : Claude (via handleMessage) ──────────────────
-    const reply = await handleMessage(chatId, transcript, t2)
+    const reply = await handleMessage(chatId, transcript, t2, true)
 
     const t3 = Date.now()
     console.log(`[LATENCY] T3 — handleMessage (Claude + contexte) : ${t3 - t2}ms`)
