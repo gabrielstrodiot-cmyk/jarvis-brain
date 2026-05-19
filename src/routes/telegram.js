@@ -72,7 +72,6 @@ function getPositionFromMemory() {
 }
 
 // ── HTML SÉCURISÉ POUR LE BRIEFING ───────────────────────────
-// Échappe tout, puis restaure uniquement <b> et </b>
 function sanitizeBriefingHtml(text) {
   return text
     .replace(/&/g, '&amp;')
@@ -156,13 +155,18 @@ async function sendVoiceReply(chatId, text) {
 }
 
 // ── TRAITEMENT MESSAGE TEXTE ──────────────────────────────────
-async function handleMessage(chatId, text) {
+async function handleMessage(chatId, text, _tRef) {
+  // _tRef : timestamp d'entrée passé depuis le handler vocal pour mesure précise
+  const tHandle = _tRef || Date.now()
+
   if (!GABRIEL_CHAT_ID) {
     GABRIEL_CHAT_ID = chatId
     console.log(`📱 Chat ID Gabriel enregistré : ${chatId}`)
   }
 
   await memory.load()
+  const tMemory = Date.now()
+  console.log(`[LATENCY] handleMessage — memory.load : ${tMemory - tHandle}ms`)
 
   // ── DRAFT VALIDATION (prioritaire sur le flux normal) ────────
   try {
@@ -173,7 +177,6 @@ async function handleMessage(chatId, text) {
       const isDraftResponse = normalized.length < 80 && !text.includes('[')
 
       if (isDraftResponse) {
-        // Validation positive
         if (['oui', 'ok', 'valide', 'go', 'yes'].includes(normalized)) {
           try {
             await obsidian.writeNote(draft.obsidian_path, draft.content)
@@ -192,7 +195,6 @@ async function handleMessage(chatId, text) {
           }
         }
 
-        // Rejet
         if (['non', 'annule', 'cancel', 'no'].includes(normalized)) {
           await db.updateDraft(draft.id, { status: 'rejected' })
           const reply = `Draft "${draft.subject}" annulé.`
@@ -202,7 +204,6 @@ async function handleMessage(chatId, text) {
           return reply
         }
 
-        // Feedback de révision
         await bot.sendChatAction(chatId, 'typing')
         try {
           const newContent = await claudeClient.generateDraftContent(
@@ -229,28 +230,40 @@ async function handleMessage(chatId, text) {
   }
 
   // ── FLUX NORMAL ───────────────────────────────────────────────
+  const tContextStart = Date.now()
   const [calendarEvents, gmailUnread] = await Promise.all([
     getCalendarEvents(),
     getGmailUnread(),
   ])
+  const tContext = Date.now()
+  console.log(`[LATENCY] handleMessage — calendar+gmail (parallel) : ${tContext - tContextStart}ms`)
 
   const rawReply = await claudeClient.chat(text, calendarEvents, gmailUnread)
+  const tClaude = Date.now()
+  console.log(`[LATENCY] handleMessage — claudeClient.chat : ${tClaude - tContext}ms`)
+
   const { text: processedReply, fetchedData, sideEffects } = await actions.processReply(rawReply)
+  const tActions = Date.now()
+  console.log(`[LATENCY] handleMessage — actions.processReply : ${tActions - tClaude}ms`)
 
   let finalReply = processedReply
 
   if (fetchedData && Object.keys(fetchedData).length > 0) {
     const dataContext = Object.values(fetchedData).join('\n\n')
     const synthesisPrompt = `Gabriel a demandé : "${text}"\n\nDonnées récupérées :\n\n${dataContext}\n\nRéponds à Gabriel de façon naturelle et concise.`
+    const tSynthStart = Date.now()
     finalReply = await claudeClient.generate(
       claudeClient.buildSystemPrompt(calendarEvents, gmailUnread),
       synthesisPrompt,
       1000
     )
+    console.log(`[LATENCY] handleMessage — 2nd Claude call (fetchedData) : ${Date.now() - tSynthStart}ms`)
   }
 
   memory.addToHistory('assistant', finalReply)
   await memory.persist()
+
+  console.log(`[LATENCY] handleMessage — TOTAL : ${Date.now() - tHandle}ms`)
 
   // ── DRAFT CREATION (en arrière-plan après la réponse normale) ─
   if (sideEffects && sideEffects.draftCreate) {
@@ -339,7 +352,6 @@ async function sendQuizPoll(chatId, note) {
     console.log(`✅ Quiz envoyé — ${note.name}`)
   } catch (e) {
     console.error('sendQuizPoll error:', e.message)
-    // Fallback silencieux — le quiz ne bloque pas le briefing
   }
 }
 
@@ -355,7 +367,6 @@ async function sendMorningBriefing() {
     console.log('🌅 Envoi morning briefing...')
     await memory.load()
 
-    // Position et météo
     const position = getPositionFromMemory()
     let weatherLine = null
     if (position) {
@@ -366,7 +377,6 @@ async function sendMorningBriefing() {
       ? `${weatherLine} à ${position.city}`
       : 'Position inconnue — envoie ta localisation Telegram pour activer la météo'
 
-    // Fetch toutes les données en parallèle
     const [calendarEvents, gmailUnread, tasks, projects, recentlyTestedPaths] = await Promise.all([
       getCalendarEvents(),
       getGmailUnread(),
@@ -400,7 +410,6 @@ SECTIONS dans cet ordre :
     await bot.sendMessage(chatId, `🌅 <b>Morning Briefing</b>\n\n${safeHtml}`, { parse_mode: 'HTML' })
     console.log('✅ Morning briefing envoyé')
 
-    // Quiz séparé (fire-and-forget sur le briefing)
     const note = await obsidian.getNoteForQuiz(recentlyTestedPaths)
     if (note) {
       await sendQuizPoll(chatId, note)
@@ -449,9 +458,14 @@ bot.on('message', async (msg) => {
 bot.on('voice', async (msg) => {
   if (!isAuthorized(msg)) return
   const chatId = msg.chat.id
+
+  const t0 = Date.now()
+  console.log(`[LATENCY] T0 — vocal reçu (duration: ${msg.voice.duration}s, size: ${msg.voice.file_size || '?'}b)`)
+
   try {
     await bot.sendChatAction(chatId, 'typing')
 
+    // ── ÉTAPE 1 : Téléchargement depuis Telegram ──────────────
     const fileId = msg.voice.file_id
     const fileInfo = await bot.getFile(fileId)
     const fileUrl = `https://api.telegram.org/file/bot${config.telegram.botToken}/${fileInfo.file_path}`
@@ -461,15 +475,48 @@ bot.on('voice', async (msg) => {
     const buffer = await audioRes.buffer()
     fs.writeFileSync(tmpFile, buffer)
 
+    const t1 = Date.now()
+    console.log(`[LATENCY] T1 — download Telegram : ${t1 - t0}ms`)
+
+    // ── ÉTAPE 2 : Transcription Whisper ───────────────────────
     const transcript = await transcribeAudio(tmpFile)
     fs.unlinkSync(tmpFile)
 
+    const t2 = Date.now()
+    console.log(`[LATENCY] T2 — Whisper STT : ${t2 - t1}ms | "${transcript.slice(0, 60)}"`)
+
     if (!transcript || transcript.trim().length === 0) {
+      console.log(`[LATENCY] ⚠️  Transcript vide — abandon`)
       return bot.sendMessage(chatId, 'Audio inaudible, reessaie.')
     }
 
-    const reply = await handleMessage(chatId, transcript)
+    // ── ÉTAPE 3 : Claude (via handleMessage) ──────────────────
+    const reply = await handleMessage(chatId, transcript, t2)
+
+    const t3 = Date.now()
+    console.log(`[LATENCY] T3 — handleMessage (Claude + contexte) : ${t3 - t2}ms`)
+
+    // ── ÉTAPE 4 : Texte Telegram ──────────────────────────────
     await bot.sendMessage(chatId, reply)
+    const t4 = Date.now()
+    console.log(`[LATENCY] T4 — bot.sendMessage (texte) : ${t4 - t3}ms`)
+
+    // ── ÉTAPE 5 : ElevenLabs TTS + vocal ─────────────────────
+    await sendVoiceReply(chatId, reply)
+    const t5 = Date.now()
+    console.log(`[LATENCY] T5 — ElevenLabs TTS + sendVoice : ${t5 - t4}ms`)
+
+    // ── RÉSUMÉ LATENCE ────────────────────────────────────────
+    console.log(`[LATENCY] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`)
+    console.log(`[LATENCY] TOTAL pipeline complet : ${t5 - t0}ms`)
+    console.log(`[LATENCY] Breakdown :`)
+    console.log(`[LATENCY]   Download Telegram  : ${t1 - t0}ms`)
+    console.log(`[LATENCY]   Whisper STT        : ${t2 - t1}ms`)
+    console.log(`[LATENCY]   Claude + contexte  : ${t3 - t2}ms`)
+    console.log(`[LATENCY]   Send texte         : ${t4 - t3}ms`)
+    console.log(`[LATENCY]   ElevenLabs + voice : ${t5 - t4}ms`)
+    console.log(`[LATENCY] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`)
+
   } catch (e) {
     console.error('Voice error:', e.message)
     await bot.sendMessage(chatId, `Erreur : ${e.message}`)
@@ -519,9 +566,6 @@ bot.on('location', async (msg) => {
     const { latitude, longitude } = msg.location
     await memory.load()
 
-    // Reverse geocode léger via open-meteo (pas de clé nécessaire)
-    // On stocke juste les coordonnées — la ville sera "ta position"
-    // Pour avoir le nom de ville, on utilise l'API nominatim (OpenStreetMap, gratuite)
     let cityName = 'ta position'
     try {
       const geo = await fetch(
