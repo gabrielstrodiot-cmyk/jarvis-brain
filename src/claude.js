@@ -148,11 +148,11 @@ async function getRagContext(message) {
   }
 }
 
-async function chat(message, calendarEvents = null, gmailUnread = null, tasks = null, projects = null, obsidianNote = null, voiceMode = false) {
+async function chat(message, calendarEvents = null, gmailUnread = null, tasks = null, projects = null, obsidianNote = null, voiceMode = false, ragContext = null) {
+  // ragContext est maintenant calculé en dehors (parallèle avec calendar+gmail)
+  // Ne jamais rappeler getRagContext ici — coût OpenAI embeddings ~6-9s
   const historyMessages = memory.getHistoryMessages()
   memory.addToHistory('user', message)
-
-  const ragContext = await getRagContext(message)
 
   // MODE VOCAL : Haiku + tokens réduits → latence 1-2s au lieu de 12s
   // MODE TEXTE : Sonnet + tokens complets → qualité maximale
@@ -279,4 +279,4 @@ Réponds UNIQUEMENT avec le JSON brut, rien d'autre.`
   return parsed
 }
 
-module.exports = { chat, chatWithImage, generate, generateDraftContent, buildSystemPrompt, generateQuizContent }
+module.exports = { chat, chatWithImage, generate, generateDraftContent, buildSystemPrompt, generateQuizContent, getRagContext }

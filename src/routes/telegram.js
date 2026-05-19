@@ -236,15 +236,17 @@ async function handleMessage(chatId, text, _tRef, isVoice = false) {
   }
 
   // ── FLUX NORMAL ───────────────────────────────────────────────
+  // RAG tourne en parallèle avec calendar+gmail — ne coûte plus rien en temps
   const tContextStart = Date.now()
-  const [calendarEvents, gmailUnread] = await Promise.all([
+  const [calendarEvents, gmailUnread, ragContext] = await Promise.all([
     getCalendarEvents(),
     getGmailUnread(),
+    claudeClient.getRagContext(text), // text original — pas effectiveText (évite le préfixe vocal dans l'embedding)
   ])
   const tContext = Date.now()
-  console.log(`[LATENCY] handleMessage — calendar+gmail (parallel) : ${tContext - tContextStart}ms`)
+  console.log(`[LATENCY] handleMessage — calendar+gmail+RAG (parallel) : ${tContext - tContextStart}ms`)
 
-  const rawReply = await claudeClient.chat(effectiveText, calendarEvents, gmailUnread, null, null, null, isVoice)
+  const rawReply = await claudeClient.chat(effectiveText, calendarEvents, gmailUnread, null, null, null, isVoice, ragContext)
   const tClaude = Date.now()
   console.log(`[LATENCY] handleMessage — claudeClient.chat : ${tClaude - tContext}ms`)
 
