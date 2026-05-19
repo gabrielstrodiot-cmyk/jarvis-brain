@@ -39,7 +39,8 @@ async function indexConversations(limit = 300) {
 
   let indexed = 0
   for (const conv of toIndex) {
-    const sourceId = `conv_${conv.id}`
+    const crypto = require('crypto')
+const sourceId = 'conv_' + crypto.createHash('md5').update(conv.content).digest('hex').slice(0, 16)
     try {
       const embedding = await generateEmbedding(conv.content)
       if (!embedding) continue
