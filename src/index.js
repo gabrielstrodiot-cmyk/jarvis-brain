@@ -101,15 +101,19 @@ async function start() {
   await db.init()
   try {
     await memory.load()
-    console.log(`🧠 Mémoire chargée : ${memory.get().facts.length} facts`)
+    console.log(`🧠 Memoire chargée : ${memory.get().facts.length} facts`)
   } catch (e) {
-    console.warn('⚠️  Mémoire non chargée :', e.message)
+    console.warn('⚠️ Memoire non chargée :', e.message)
   }
+
+  // RAG index — non-bloquant, tourne en arrière-plan au démarrage
+  embeddings.indexAll().catch(e => console.error('🔴 RAG indexAll:', e.message))
+
   app.listen(config.port, () => {
-    console.log(`🤖 Jarvis v2.0 démarré sur le port ${config.port}`)
-    console.log(`📅 Google : ${config.google.refreshToken ? '✅' : '⚠️  visite /auth/google'}`)
-    console.log(`📄 Notion : ${config.notion.token ? '✅' : '❌'}`)
-    console.log(`🎙️  Voice : prêt pour session 2`)
+    console.log(`🤖 Jarvis v2.0 demarre sur le port ${config.port}`)
+    console.log(`📅 Google : ${config.google.refreshToken ? '✅' : '⚠️ visite /auth/google'}`)
+    console.log(`📋 Notion : ${config.notion.token ? '✅' : '❌'}`)
+    console.log(`🎙 Voice : prêt pour session 2`)
   })
 }
 

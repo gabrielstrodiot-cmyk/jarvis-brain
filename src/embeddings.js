@@ -1,48 +1,63 @@
 const OpenAI = require('openai')
-const { Client } = require('@notionhq/client')
 const config = require('./config')
 const db = require('./db')
+const { Client } = require('@notionhq/client')
 
 const openai = new OpenAI({ apiKey: config.openai.apiKey })
 const notion = new Client({ auth: config.notion.token })
+const JOURNAL_PAGE_ID = config.notion.checkinPageId
 
-const JOURNAL_PAGE_ID = '347a16a5dea281a0b479cb00f2f6d772'
-const SIMILARITY_THRESHOLD = 0.72
+// ─── CORE ────────────────────────────────────────────────────────────────────
 
-async function createEmbedding(text) {
+async function generateEmbedding(text) {
+  const clean = text.replace(/\s+/g, ' ').trim().slice(0, 8000)
+  if (!clean || clean.length < 10) return null
   const response = await openai.embeddings.create({
     model: 'text-embedding-ada-002',
-    input: text.slice(0, 8000)
+    input: clean
   })
   return response.data[0].embedding
 }
 
 async function searchSimilar(query, limit = 5) {
   try {
-    const count = await db.getEmbeddingsCount()
-    if (count === 0) return []
-    const queryEmbedding = await createEmbedding(query)
-    const results = await db.searchEmbeddings(queryEmbedding, limit)
-    return results.filter(r => parseFloat(r.similarity) > SIMILARITY_THRESHOLD)
+    const embedding = await generateEmbedding(query)
+    if (!embedding) return []
+    const results = await db.searchEmbeddings(embedding, limit)
+    return results.filter(r => r.similarity > 0.72)
   } catch (e) {
-    console.error('🔴 searchSimilar error:', e.message)
+    console.error('🔴 searchSimilar:', e.message)
     return []
   }
 }
 
-function extractTextFromBlocks(blocks) {
-  const lines = []
-  for (const block of blocks) {
-    const type = block.type
-    if (!block[type]) continue
-    const richText = block[type].rich_text || []
-    const text = richText.map(t => t.plain_text).join('')
-    if (text.trim()) lines.push(text)
+// ─── INDEX CONVERSATIONS ──────────────────────────────────────────────────────
+
+async function indexConversations(limit = 300) {
+  const allConvs = await db.loadAllHistory(limit)
+  const toIndex = allConvs.filter(c => c.role === 'user' && c.content.length > 40)
+
+  let indexed = 0
+  for (const conv of toIndex) {
+    const sourceId = `conv_${conv.id}`
+    try {
+      const embedding = await generateEmbedding(conv.content)
+      if (!embedding) continue
+      await db.saveEmbedding(conv.content, embedding, 'conversation', sourceId)
+      indexed++
+      // Éviter rate limit OpenAI
+      if (indexed % 20 === 0) await sleep(1000)
+    } catch (e) {
+      console.error(`🔴 embed conv_${conv.id}:`, e.message)
+    }
   }
-  return lines.join('\n')
+  console.log(`✅ Conversations indexées : ${indexed}`)
+  return indexed
 }
 
-async function getPageBlocks(pageId) {
+// ─── INDEX JOURNAL NOTION ─────────────────────────────────────────────────────
+
+async function fetchNotionBlocks(pageId) {
   const blocks = []
   let cursor = undefined
   do {
@@ -57,112 +72,93 @@ async function getPageBlocks(pageId) {
   return blocks
 }
 
-function chunkText(text, maxChars = 1200) {
-  const paragraphs = text.split('\n\n').filter(p => p.trim())
-  const chunks = []
-  let current = ''
-  for (const para of paragraphs) {
-    if ((current + '\n\n' + para).length > maxChars && current) {
-      chunks.push(current.trim())
-      current = para
+function extractJournalEntries(blocks) {
+  const entries = []
+  let currentDate = null
+  let currentLines = []
+
+  for (const block of blocks) {
+    const type = block.type
+    const richText = block[type]?.rich_text || []
+    const text = richText.map(t => t.plain_text).join('').trim()
+
+    if (!text) {
+      if (currentLines.length > 0) {
+        entries.push({ date: currentDate, content: currentLines.join('\n') })
+        currentLines = []
+        currentDate = null
+      }
+      continue
+    }
+
+    if (type === 'heading_1' || type === 'heading_2' || type === 'heading_3') {
+      if (currentLines.length > 0) {
+        entries.push({ date: currentDate, content: currentLines.join('\n') })
+        currentLines = []
+      }
+      currentDate = text
     } else {
-      current = current ? current + '\n\n' + para : para
+      currentLines.push(text)
     }
   }
-  if (current.trim()) chunks.push(current.trim())
-  return chunks.length > 0 ? chunks : [text.slice(0, maxChars)]
+
+  if (currentLines.length > 0) {
+    entries.push({ date: currentDate, content: currentLines.join('\n') })
+  }
+
+  return entries
 }
 
 async function indexNotionJournal() {
-  console.log('📚 Indexation journal Notion...')
-  let indexed = 0, skipped = 0, errors = 0
-
   try {
-    const blocks = await getPageBlocks(JOURNAL_PAGE_ID)
-    const childPages = blocks.filter(b => b.type === 'child_page')
+    const blocks = await fetchNotionBlocks(JOURNAL_PAGE_ID)
+    const entries = extractJournalEntries(blocks)
 
-    if (childPages.length > 0) {
-      console.log(`📄 ${childPages.length} entrées journal trouvées`)
-      for (const page of childPages) {
-        try {
-          const title = page.child_page?.title || 'Sans titre'
-          const pageBlocks = await getPageBlocks(page.id)
-          const content = extractTextFromBlocks(pageBlocks)
-          if (!content.trim() || content.length < 30) { skipped++; continue }
+    let indexed = 0
+    for (let i = 0; i < entries.length; i++) {
+      const entry = entries[i]
+      if (entry.content.length < 40) continue
 
-          const chunks = chunkText(content)
-          for (let i = 0; i < chunks.length; i++) {
-            const chunkContent = `Journal — ${title}\n\n${chunks[i]}`
-            const embedding = await createEmbedding(chunkContent)
-            await db.saveEmbedding(chunkContent, embedding, 'notion_journal', `journal_${page.id}_${i}`)
-            indexed++
-            await new Promise(r => setTimeout(r, 150))
-          }
-        } catch (e) {
-          console.error(`🔴 Erreur page ${page.id}:`, e.message)
-          errors++
-        }
-      }
-    } else {
-      // Page plate sans sous-pages — indexer directement les blocs
-      const content = extractTextFromBlocks(blocks)
-      if (content.trim() && content.length > 30) {
-        const chunks = chunkText(content, 1000)
-        for (let i = 0; i < chunks.length; i++) {
-          const chunkContent = `Journal Gabriel\n\n${chunks[i]}`
-          const embedding = await createEmbedding(chunkContent)
-          await db.saveEmbedding(chunkContent, embedding, 'notion_journal', `journal_flat_${i}`)
-          indexed++
-          await new Promise(r => setTimeout(r, 150))
-        }
+      const fullText = entry.date
+        ? `[Journal — ${entry.date}]\n${entry.content}`
+        : entry.content
+
+      const sourceId = `journal_${JOURNAL_PAGE_ID}_${i}`
+
+      try {
+        const embedding = await generateEmbedding(fullText)
+        if (!embedding) continue
+        await db.saveEmbedding(fullText, embedding, 'journal', sourceId)
+        indexed++
+        if (indexed % 10 === 0) await sleep(500)
+      } catch (e) {
+        console.error(`🔴 embed journal_${i}:`, e.message)
       }
     }
+
+    console.log(`✅ Journal indexé : ${indexed} entrées`)
+    return indexed
   } catch (e) {
-    console.error('🔴 indexNotionJournal error:', e.message)
+    console.error('🔴 indexNotionJournal:', e.message)
+    return 0
   }
-
-  const result = { indexed, skipped, errors }
-  console.log('✅ Journal indexé:', result)
-  return result
 }
 
-async function indexConversations() {
-  console.log('💬 Indexation conversations...')
-  let indexed = 0
+// ─── FULL INDEX ────────────────────────────────────────────────────────────────
 
-  try {
-    const messages = await db.loadAllHistory(300)
-    if (messages.length < 5) {
-      console.log('⚠️  Pas assez de conversations')
-      return { indexed: 0 }
-    }
-
-    const chunkSize = 10
-    for (let i = 0; i < messages.length; i += chunkSize) {
-      const chunk = messages.slice(i, i + chunkSize)
-      const content = chunk
-        .map(m => `${m.role === 'user' ? 'Gabriel' : 'Jarvis'}: ${m.content}`)
-        .join('\n')
-      if (content.length < 80) continue
-
-      const sourceId = `conv_${chunk[0].id}_${chunk[chunk.length - 1].id}`
-      const embedding = await createEmbedding(content)
-      await db.saveEmbedding(content, embedding, 'conversation', sourceId)
-      indexed++
-      await new Promise(r => setTimeout(r, 150))
-    }
-  } catch (e) {
-    console.error('🔴 indexConversations error:', e.message)
-  }
-
-  const result = { indexed }
-  console.log('✅ Conversations indexées:', result)
-  return result
+async function indexAll() {
+  console.log('🔄 RAG index démarré...')
+  const conv = await indexConversations()
+  const journal = await indexNotionJournal()
+  const total = conv + journal
+  console.log(`✅ RAG index terminé : ${conv} conv + ${journal} journal = ${total} total`)
+  return { conversations: conv, journal, total }
 }
 
-async function indexSingleNote(content, sourceId) {
-  const embedding = await createEmbedding(content)
-  await db.saveEmbedding(content, embedding, 'obsidian_validated', sourceId)
+// ─── UTILS ────────────────────────────────────────────────────────────────────
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms))
 }
 
-module.exports = { searchSimilar, indexNotionJournal, indexConversations, indexSingleNote }
+module.exports = { generateEmbedding, searchSimilar, indexConversations, indexNotionJournal, indexAll }
