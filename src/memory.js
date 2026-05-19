@@ -15,6 +15,15 @@ function addToHistory(role, content) {
   store.history.push(entry)
   if (store.history.length > 20) store.history = store.history.slice(-20)
   db.saveMessage(role, content).catch(e => console.error('🔴 DB history save:', e.message))
+
+  // Index RAG en temps réel — messages user uniquement
+  if (role === 'user' && content.length > 40 && !content.startsWith('[IMAGE]')) {
+    const sourceId = `conv_realtime_${Date.now()}`
+    const { generateEmbedding } = require('./embeddings')
+    generateEmbedding(content)
+      .then(embedding => { if (embedding) db.saveEmbedding(content, embedding, 'conversation', sourceId) })
+      .catch(e => console.error('🔴 RAG realtime:', e.message))
+  }
 }
 
 function getHistoryMessages() {
