@@ -276,9 +276,14 @@ async function handleMessage(chatId, text, _tRef, isVoice = false) {
   }
 
   memory.addToHistory('assistant', finalReply)
-  await memory.persist()
+  // Fire and forget — persist en arrière-plan, ne bloque plus la réponse
+  // La réponse est déjà en RAM, DB rattrape dans les secondes qui suivent
+  const tPersistStart = Date.now()
+  memory.persist().then(() => {
+    console.log(`[LATENCY] handleMessage — memory.persist (background) : ${Date.now() - tPersistStart}ms`)
+  }).catch(e => console.error('persist error:', e))
 
-  console.log(`[LATENCY] handleMessage — TOTAL : ${Date.now() - tHandle}ms`)
+  console.log(`[LATENCY] handleMessage — TOTAL (sans persist) : ${Date.now() - tHandle}ms`)
 
   // ── DRAFT CREATION (en arrière-plan après la réponse normale) ─
   if (sideEffects && sideEffects.draftCreate) {
