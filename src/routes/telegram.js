@@ -161,10 +161,9 @@ async function handleMessage(chatId, text, _tRef, isVoice = false) {
   // isVoice : contraint Claude à 3 phrases max, sans HTML — réduit latence x4
   const tHandle = _tRef || Date.now()
 
-  // Contrainte vocale injectée dans le message utilisateur
-  const effectiveText = isVoice
-    ? `[MODE VOCAL — réponds en 3 phrases maximum, pas de HTML ni de balises, parle naturellement à voix haute]\n\n${text}`
-    : text
+  // Mode vocal : contrainte gérée dans buildSystemPrompt (system prompt)
+  // Plus besoin de préfixe dans le message — moins de tokens, signal plus fort
+  const effectiveText = text
 
   if (!GABRIEL_CHAT_ID) {
     GABRIEL_CHAT_ID = chatId
@@ -276,14 +275,9 @@ async function handleMessage(chatId, text, _tRef, isVoice = false) {
   }
 
   memory.addToHistory('assistant', finalReply)
-  // Fire and forget — persist en arrière-plan, ne bloque plus la réponse
-  // La réponse est déjà en RAM, DB rattrape dans les secondes qui suivent
-  const tPersistStart = Date.now()
-  memory.persist().then(() => {
-    console.log(`[LATENCY] handleMessage — memory.persist (background) : ${Date.now() - tPersistStart}ms`)
-  }).catch(e => console.error('persist error:', e))
+  await memory.persist()
 
-  console.log(`[LATENCY] handleMessage — TOTAL (sans persist) : ${Date.now() - tHandle}ms`)
+  console.log(`[LATENCY] handleMessage — TOTAL : ${Date.now() - tHandle}ms`)
 
   // ── DRAFT CREATION (en arrière-plan après la réponse normale) ─
   if (sideEffects && sideEffects.draftCreate) {

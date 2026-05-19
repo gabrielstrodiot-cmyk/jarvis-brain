@@ -41,7 +41,7 @@ function getBrusselsDateContext() {
   return { dateStr, timeStr, isoToday, isoNow, weekDays }
 }
 
-function buildSystemPrompt(calendarEvents, gmailUnread, tasks, projects, obsidianNote, ragContext = null) {
+function buildSystemPrompt(calendarEvents, gmailUnread, tasks, projects, obsidianNote, ragContext = null, voiceMode = false) {
   const facts          = memory.formatFactsForPrompt()
   const calendar       = calendarEvents   ? `\n\n## AGENDA DU JOUR\n${calendarEvents}`           : ''
   const gmail          = gmailUnread      ? `\n\n## MAILS NON LUS\n${gmailUnread}`                : ''
@@ -132,7 +132,16 @@ ${weekDays.join('\n')}
 - Jamais de intro générique comme "Bien sûr !" ou "Absolument !"
 - Si tu listes des choses, écris-les en prose ou avec des numéros simples
 - Si tu ne sais pas, dis-le directement
-- Quand tu peux agir, agis — ne demande pas de confirmation pour des actions simples`
+- Quand tu peux agir, agis — ne demande pas de confirmation pour des actions simples
+${voiceMode ? `
+
+## MODE VOCAL — RÈGLE ABSOLUE PRIORITAIRE
+Tu réponds à un message vocal. Ces règles écrasent tout le reste :
+- MAXIMUM 2 phrases. Pas 3. Pas 4. 2 phrases.
+- ZÉRO HTML, ZÉRO balise, ZÉRO liste, ZÉRO markdown
+- Parle comme tu parlerais à voix haute — naturel, direct, dense
+- Si la question est complexe : donne le point le plus important seulement
+- Jamais de "je vais faire X" sans le faire dans la même réponse` : ''}`
 }
 
 async function getRagContext(message) {
@@ -162,7 +171,7 @@ async function chat(message, calendarEvents = null, gmailUnread = null, tasks = 
   const response = await client.messages.create({
     model,
     max_tokens: maxTokens,
-    system: buildSystemPrompt(calendarEvents, gmailUnread, tasks, projects, obsidianNote, ragContext),
+    system: buildSystemPrompt(calendarEvents, gmailUnread, tasks, projects, obsidianNote, ragContext, voiceMode),
     messages: [...historyMessages, { role: 'user', content: message }],
   })
   return response.content[0].text
