@@ -19,7 +19,8 @@ function addToHistory(role, content) {
   // Index RAG en temps réel — messages user uniquement
   if (role === 'user' && content.length > 40 && !content.startsWith('[IMAGE]')) {
 const crypto = require('crypto')
-const sourceId = 'conv_' + crypto.createHash('md5').update(content).digest('hex').slice(0, 16)    const { generateEmbedding } = require('./embeddings')
+const sourceId = 'conv_' + crypto.createHash('md5').update(content).digest('hex').slice(0, 16)
+    const { generateEmbedding } = require('./embeddings')
     generateEmbedding(content)
       .then(embedding => { if (embedding) db.saveEmbedding(content, embedding, 'conversation', sourceId) })
       .catch(e => console.error('🔴 RAG realtime:', e.message))
