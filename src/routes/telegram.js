@@ -16,6 +16,7 @@ const obsidian = require('../obsidian')
 
 const bot = new TelegramBot(config.telegram.botToken, { polling: true })
 let GABRIEL_CHAT_ID = process.env.TELEGRAM_CHAT_ID || null
+let hasPendingDraft = false  // flag RAM — évite getPendingDrafts() sur chaque message
 
 // ── WHITELIST ─────────────────────────────────────────────────
 const ALLOWED_USER_ID = parseInt(process.env.TELEGRAM_ALLOWED_USER_ID)
@@ -175,8 +176,12 @@ async function handleMessage(chatId, text, _tRef, isVoice = false) {
   console.log(`[LATENCY] handleMessage — memory.load : ${tMemory - tHandle}ms`)
 
   // ── DRAFT VALIDATION (prioritaire sur le flux normal) ────────
+  // OPTIMISATION : skip la requête SQL si aucun draft en attente en RAM
+  // hasPendingDraft est un flag mis à true par sideEffects.draftCreate, remis à false après traitement
+  const tDraftStart = Date.now()
   try {
-    const pendingDrafts = await db.getPendingDrafts()
+    const pendingDrafts = hasPendingDraft ? await db.getPendingDrafts() : []
+    console.log(`[LATENCY] handleMessage — draft check (hasPendingDraft=${hasPendingDraft}) : ${Date.now() - tDraftStart}ms`)
     if (pendingDrafts.length > 0) {
       const draft = pendingDrafts[0]
       const normalized = text.toLowerCase().trim()
@@ -191,6 +196,7 @@ async function handleMessage(chatId, text, _tRef, isVoice = false) {
               const { indexSingleNote } = require('../embeddings')
               await indexSingleNote('Note Obsidian ' + draft.subject + '\n\n' + draft.content, 'obsidian_' + draft.id)
             } catch (e) { console.error('Indexing error:', e.message) }
+            hasPendingDraft = false
             const reply = `Note validée — "${draft.subject}" écrite dans Obsidian.`
             memory.addToHistory('user', text)
             memory.addToHistory('assistant', reply)
@@ -202,6 +208,7 @@ async function handleMessage(chatId, text, _tRef, isVoice = false) {
         }
 
         if (['non', 'annule', 'cancel', 'no'].includes(normalized)) {
+          hasPendingDraft = false
           await db.updateDraft(draft.id, { status: 'rejected' })
           const reply = `Draft "${draft.subject}" annulé.`
           memory.addToHistory('user', text)
@@ -275,6 +282,7 @@ async function handleMessage(chatId, text, _tRef, isVoice = false) {
 
   // ── DRAFT CREATION (en arrière-plan après la réponse normale) ─
   if (sideEffects && sideEffects.draftCreate) {
+    hasPendingDraft = true  // activer le flag — prochain message sera intercepté
     const subject = sideEffects.draftCreate
     setImmediate(async () => {
       try {
