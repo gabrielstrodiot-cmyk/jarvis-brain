@@ -161,4 +161,15 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
-module.exports = { generateEmbedding, searchSimilar, indexConversations, indexNotionJournal, indexAll }
+async function indexSingleNote(content, sourceId) {
+  try {
+    const embedding = await generateEmbedding(content)
+    if (!embedding) return
+    await db.saveEmbedding(content, embedding, 'obsidian', sourceId)
+    console.log(`✅ Note indexée : ${sourceId}`)
+  } catch (e) {
+    console.error('🔴 indexSingleNote:', e.message)
+  }
+}
+
+module.exports = { generateEmbedding, searchSimilar, indexConversations, indexNotionJournal, indexAll, indexSingleNote }
