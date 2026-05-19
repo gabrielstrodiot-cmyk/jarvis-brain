@@ -423,6 +423,12 @@ cron.schedule('30 6 * * *', () => {
 
 console.log('⏰ Morning briefing programmé à 06h30 (Europe/Brussels)')
 
+// CRON 03h00 — Re-indexation journal Notion ─────────────────────────────
+cron.schedule('0 3 * * *', () => {
+  const { indexNotionJournal } = require('../embeddings')
+  indexNotionJournal().catch(e => console.error('🔴 Cron journal index:', e.message))
+}, { timezone: 'Europe/Brussels' })
+
 // ── MESSAGES TEXTE ────────────────────────────────────────────
 bot.on('message', async (msg) => {
   if (!isAuthorized(msg)) return
