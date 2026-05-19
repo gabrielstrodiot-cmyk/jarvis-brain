@@ -96,13 +96,25 @@ async function loadFacts() {
 }
 
 async function saveFacts(facts) {
+  // Batch transactionnel — 3 requêtes au lieu de N+1 séquentielles
+  // 35 facts : 6 000ms → ~50ms
+  const client = await pool.connect()
   try {
-    await pool.query('DELETE FROM facts')
-    for (const fact of facts) {
-      await pool.query('INSERT INTO facts (content) VALUES ($1) ON CONFLICT (content) DO NOTHING', [fact])
+    await client.query('BEGIN')
+    await client.query('DELETE FROM facts')
+    if (facts.length > 0) {
+      const placeholders = facts.map((_, i) => `($${i + 1})`).join(', ')
+      await client.query(
+        `INSERT INTO facts (content) VALUES ${placeholders} ON CONFLICT (content) DO NOTHING`,
+        facts
+      )
     }
+    await client.query('COMMIT')
   } catch (e) {
+    await client.query('ROLLBACK').catch(() => {})
     console.error('🔴 saveFacts error:', e.message)
+  } finally {
+    client.release()
   }
 }
 

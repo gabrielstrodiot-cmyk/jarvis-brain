@@ -3,8 +3,10 @@ const db = require('./db')
 let store = { facts: [], history: [] }
 
 async function load() {
-  store.facts = await db.loadFacts()
-  store.history = await db.loadHistory()
+  // Paralléliser les deux lectures DB — 293ms → ~150ms
+  const [facts, history] = await Promise.all([db.loadFacts(), db.loadHistory()])
+  store.facts = facts
+  store.history = history
   return store
 }
 
