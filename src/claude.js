@@ -148,15 +148,20 @@ async function getRagContext(message) {
   }
 }
 
-async function chat(message, calendarEvents = null, gmailUnread = null, tasks = null, projects = null, obsidianNote = null) {
+async function chat(message, calendarEvents = null, gmailUnread = null, tasks = null, projects = null, obsidianNote = null, voiceMode = false) {
   const historyMessages = memory.getHistoryMessages()
   memory.addToHistory('user', message)
 
   const ragContext = await getRagContext(message)
 
+  // MODE VOCAL : Haiku + tokens réduits → latence 1-2s au lieu de 12s
+  // MODE TEXTE : Sonnet + tokens complets → qualité maximale
+  const model     = voiceMode ? 'claude-haiku-4-5-20251001' : 'claude-sonnet-4-5'
+  const maxTokens = voiceMode ? 400 : 2048
+
   const response = await client.messages.create({
-    model: 'claude-sonnet-4-5',
-    max_tokens: 2048,
+    model,
+    max_tokens: maxTokens,
     system: buildSystemPrompt(calendarEvents, gmailUnread, tasks, projects, obsidianNote, ragContext),
     messages: [...historyMessages, { role: 'user', content: message }],
   })

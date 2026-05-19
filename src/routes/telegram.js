@@ -244,7 +244,7 @@ async function handleMessage(chatId, text, _tRef, isVoice = false) {
   const tContext = Date.now()
   console.log(`[LATENCY] handleMessage — calendar+gmail (parallel) : ${tContext - tContextStart}ms`)
 
-  const rawReply = await claudeClient.chat(effectiveText, calendarEvents, gmailUnread)
+  const rawReply = await claudeClient.chat(effectiveText, calendarEvents, gmailUnread, null, null, null, isVoice)
   const tClaude = Date.now()
   console.log(`[LATENCY] handleMessage — claudeClient.chat : ${tClaude - tContext}ms`)
 
